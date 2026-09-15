@@ -1,0 +1,52 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+      - run: xvfb-run -a python -m unittest discover -s tests -v
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: FeynmanDiagramStudio-macOS
+            path: dist/FeynmanDiagramStudio.app
+          - os: windows-latest
+            artifact: FeynmanDiagramStudio-Windows
+            path: dist/FeynmanDiagramStudio.exe
+          - os: ubuntu-latest
+            artifact: FeynmanDiagramStudio-Linux
+            path: dist/FeynmanDiagramStudio
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Linux GUI libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - run: python -m pip install -e '.[dev]'
+      - name: Build app
+        shell: bash
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
