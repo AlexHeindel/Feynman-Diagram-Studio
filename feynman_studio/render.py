@@ -42,6 +42,14 @@ class Text:
     value: str
     color: str
     size: float
+    source: str = ""
+
+
+@dataclass(frozen=True)
+class LabelRun:
+    text: str
+    script: int = 0  # -1 superscript, +1 subscript
+    overbar: bool = False
 
 
 Primitive = Union[Polyline, Polygon, Circle, Text]
@@ -83,17 +91,52 @@ _SUPERSCRIPT = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺�
 _SUBSCRIPT = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
 
 
+def _script_approximation(value: str, table, marker: str) -> str:
+    translated = value.translate(table)
+    return translated if translated != value else marker + value
+
+
 def display_label(source: str) -> str:
     """Turn common TeX labels into a readable native-canvas approximation."""
-    value = re.sub(r"\\(?:bar|overline)\{([^{}]+)\}", lambda m: m.group(1) + "\u0305", source)
+    value = re.sub(r"\\(?:bar|overline)\{([^{}]+)\}", lambda m: m.group(1) + "\u0304", source)
     value = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", lambda m: "({})⁄({})".format(m.group(1), m.group(2)), value)
     value = re.sub(r"\\(?:mathrm|mathbf|mathit|text)\{([^{}]+)\}", r"\1", value)
     value = re.sub(r"\\([A-Za-z]+)", lambda m: _TEX_WORDS.get(m.group(1), m.group(0)), value)
-    value = re.sub(r"\^\{([^{}]+)\}", lambda m: m.group(1).translate(_SUPERSCRIPT), value)
-    value = re.sub(r"_\{([^{}]+)\}", lambda m: m.group(1).translate(_SUBSCRIPT), value)
-    value = re.sub(r"\^([A-Za-z0-9+\-=])", lambda m: m.group(1).translate(_SUPERSCRIPT), value)
-    value = re.sub(r"_([A-Za-z0-9+\-=])", lambda m: m.group(1).translate(_SUBSCRIPT), value)
+    value = re.sub(r"\^\{([^{}]+)\}", lambda m: _script_approximation(m.group(1), _SUPERSCRIPT, "^"), value)
+    value = re.sub(r"_\{([^{}]+)\}", lambda m: _script_approximation(m.group(1), _SUBSCRIPT, "_"), value)
+    value = re.sub(r"\^([A-Za-z0-9+\-=])", lambda m: _script_approximation(m.group(1), _SUPERSCRIPT, "^"), value)
+    value = re.sub(r"_([A-Za-z0-9+\-=])", lambda m: _script_approximation(m.group(1), _SUBSCRIPT, "_"), value)
     return value.replace("{", "").replace("}", "")
+
+
+def _plain_tex_atom(value: str) -> str:
+    return re.sub(r"\\([A-Za-z]+)", lambda m: _TEX_WORDS.get(m.group(1), m.group(0)), value).replace("{", "").replace("}", "")
+
+
+def _label_runs(source: str, fallback: str) -> List[LabelRun]:
+    if not source or re.search(r"\\(?:frac|mathrm|mathbf|mathit|text)\b", source):
+        return [LabelRun(fallback)]
+    token = re.compile(
+        r"\\(?:bar|overline)\{((?:\\[A-Za-z]+|[^{}])+)\}"
+        r"|([_^])\{([^{}]+)\}"
+        r"|([_^])([A-Za-z0-9+\-=])"
+        r"|\\([A-Za-z]+)"
+        r"|([^{}])"
+    )
+    runs: List[LabelRun] = []
+    for match in token.finditer(source):
+        overbar, grouped_script, grouped_value, single_script, single_value, command, literal = match.groups()
+        if overbar is not None:
+            runs.append(LabelRun(_plain_tex_atom(overbar), overbar=True))
+        elif grouped_script is not None:
+            runs.append(LabelRun(_plain_tex_atom(grouped_value), -1 if grouped_script == "^" else 1))
+        elif single_script is not None:
+            runs.append(LabelRun(single_value, -1 if single_script == "^" else 1))
+        elif command is not None:
+            runs.append(LabelRun(_TEX_WORDS.get(command, "\\" + command)))
+        elif literal:
+            runs.append(LabelRun(literal))
+    return runs or [LabelRun(fallback)]
 
 
 def _circle_segments(vertex: Vertex, radius: float, angle_degrees: float) -> List[Tuple[Point, Point]]:
@@ -179,12 +222,13 @@ def make_scene(document: Diagram) -> List[Primitive]:
                     display_label(edge.label),
                     edge.color,
                     font,
+                    edge.label,
                 )
             )
     for vertex in document.vertices:
         _marker(scene, vertex, stroke)
         if vertex.label:
-            scene.append(Text((vertex.x + vertex.labelX, vertex.y + vertex.labelY), display_label(vertex.label), "#172333", font))
+            scene.append(Text((vertex.x + vertex.labelX, vertex.y + vertex.labelY), display_label(vertex.label), "#172333", font, vertex.label))
     return scene
 
 
@@ -264,6 +308,27 @@ def _draw_dashed(draw, points: Sequence[Point], fill: str, width: int, dash: Seq
                 painting = not painting
 
 
+def _draw_label(draw, primitive: Text, scale: float) -> None:
+    main_size = max(8, round(primitive.size * scale))
+    runs = _label_runs(primitive.source, primitive.value)
+    prepared = []
+    total_width = 0.0
+    for run in runs:
+        font = _font(round(main_size * 0.68) if run.script else main_size)
+        width = draw.textlength(run.text, font=font)
+        prepared.append((run, font, width))
+        total_width += width
+    x = primitive.point[0] * scale - total_width / 2
+    baseline = primitive.point[1] * scale + main_size * 0.32
+    for run, font, width in prepared:
+        y = baseline - main_size * 0.38 if run.script < 0 else baseline + main_size * 0.22 if run.script > 0 else baseline
+        draw.text((x, y), run.text, fill=primitive.color, font=font, anchor="ls")
+        if run.overbar:
+            bar_y = baseline - main_size * 0.78
+            draw.line((x, bar_y, x + width, bar_y), fill=primitive.color, width=max(1, round(main_size * 0.055)))
+        x += width
+
+
 def _render_at_size(
     document: Diagram,
     width: int,
@@ -307,8 +372,7 @@ def _render_at_size(
             box = ((x - radius) * scale, (y - radius) * scale, (x + radius) * scale, (y + radius) * scale)
             draw.ellipse(box, fill=primitive.fill, outline=primitive.outline, width=max(1, round(primitive.width * scale)))
         else:
-            font = _font(round(primitive.size * scale))
-            draw.text((primitive.point[0] * scale, primitive.point[1] * scale), primitive.value, fill=primitive.color, font=font, anchor="mm")
+            _draw_label(draw, primitive, scale)
     return image
 
 

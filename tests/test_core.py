@@ -6,7 +6,7 @@ from pathlib import Path
 from feynman_studio.geometry import curve, geometry
 from feynman_studio.latex import FORMATS, latex_source, standalone_source
 from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, make_edge, make_vertex, snap_value, templates
-from feynman_studio.render import display_label, render_preview, save_pdf, save_raster, svg_document
+from feynman_studio.render import _label_runs, display_label, render_preview, save_pdf, save_raster, svg_document
 
 try:
     from PIL import Image
@@ -35,6 +35,15 @@ class ModelTests(unittest.TestCase):
                 "Vacuum polarization",
             }.issubset(titles)
         )
+
+    def test_reference_templates_use_ordered_textbook_layouts(self):
+        documents = {document.title: document for document in templates()}
+        compton = documents["Compton scattering"]
+        self.assertEqual({vertex.y for vertex in compton.vertices[:4]}, {240})
+        muon = documents["Muon decay"]
+        self.assertEqual([vertex.y for vertex in muon.vertices[:4]], [160, 160, 320, 160])
+        kaon = documents["Kaon decay to three pions"]
+        self.assertEqual([vertex.y for vertex in kaon.vertices[6:]], [60, 140, 220, 300, 380, 440])
 
     def test_invalid_projects_are_rejected(self):
         base = templates()[0].to_dict()
@@ -147,7 +156,11 @@ class ExportTests(unittest.TestCase):
     def test_common_tex_labels_have_native_preview(self):
         self.assertEqual(display_label(r"\mu^{+}"), "μ⁺")
         self.assertEqual(display_label(r"p_1"), "p₁")
-        self.assertEqual(display_label(r"\bar{q}"), "q̅")
+        self.assertEqual(display_label(r"\bar{q}"), "q̄")
+        self.assertEqual(display_label(r"\nu_{\mu}"), "ν_μ")
+        self.assertEqual(display_label(r"\bar{\nu}_{e}"), "ν̄_e")
+        self.assertEqual([(run.text, run.script, run.overbar) for run in _label_runs(r"\nu_{\mu}", "")], [("ν", 0, False), ("μ", 1, False)])
+        self.assertEqual([(run.text, run.script, run.overbar) for run in _label_runs(r"\bar{d}", "")], [("d", 0, True)])
         self.assertEqual(display_label(r"\frac{g^2}{4\pi}"), "(g²)⁄(4π)")
 
     @unittest.skipUnless(Image is not None, "Pillow is not installed")

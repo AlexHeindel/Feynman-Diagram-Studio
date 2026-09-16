@@ -409,17 +409,17 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Kaon decay to three pions",
             vertices=[
-                _vertex("v1", 60, 120, "u"),
-                _vertex("v2", 240, 120, visible=True),
-                _vertex("v3", 60, 320, r"\bar{s}"),
-                _vertex("v4", 220, 320, visible=True),
+                _vertex("v1", 60, 100, "u"),
+                _vertex("v2", 220, 100, visible=True),
+                _vertex("v3", 60, 340, r"\bar{s}"),
+                _vertex("v4", 220, 340, visible=True),
                 _vertex("v5", 400, 220, visible=True),
                 _vertex("v6", 500, 340, visible=True),
                 _vertex("v7", 660, 60, "u"),
                 _vertex("v8", 660, 140, r"\bar{d}"),
-                _vertex("v9", 660, 260, "u"),
-                _vertex("v10", 660, 340, r"\bar{d}"),
-                _vertex("v11", 660, 400, "d"),
+                _vertex("v9", 660, 220, "u"),
+                _vertex("v10", 660, 300, r"\bar{d}"),
+                _vertex("v11", 660, 380, "d"),
                 _vertex("v12", 660, 440, r"\bar{u}"),
             ],
             edges=[
@@ -438,12 +438,12 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Compton scattering",
             vertices=[
-                _vertex("v1", 80, 140, "e^{-}"),
-                _vertex("v2", 280, 220, visible=True),
-                _vertex("v3", 440, 260, visible=True),
-                _vertex("v4", 640, 340, "e^{-}"),
-                _vertex("v5", 80, 380, r"\gamma"),
-                _vertex("v6", 640, 100, r"\gamma"),
+                _vertex("v1", 80, 240, "e^{-}"),
+                _vertex("v2", 280, 240, visible=True),
+                _vertex("v3", 440, 240, visible=True),
+                _vertex("v4", 640, 240, "e^{-}"),
+                _vertex("v5", 80, 400, r"\gamma"),
+                _vertex("v6", 640, 80, r"\gamma"),
             ],
             edges=[
                 _edge("e1", "v1", "v2"),
@@ -456,11 +456,11 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Muon decay",
             vertices=[
-                _vertex("v1", 80, 240, r"\mu^{-}"),
-                _vertex("v2", 280, 240, visible=True),
-                _vertex("v3", 440, 240, visible=True),
-                _vertex("v4", 640, 100, r"\nu_{\mu}"),
-                _vertex("v5", 640, 300, "e^{-}"),
+                _vertex("v1", 80, 160, r"\mu^{-}"),
+                _vertex("v2", 280, 160, visible=True),
+                _vertex("v3", 440, 320, visible=True),
+                _vertex("v4", 640, 160, r"\nu_{\mu}"),
+                _vertex("v5", 640, 280, "e^{-}"),
                 _vertex("v6", 640, 420, r"\bar{\nu}_{e}"),
             ],
             edges=[

@@ -28,7 +28,7 @@ from .model import (
     snap_value,
     templates,
 )
-from .render import render_preview, save_pdf, save_raster, save_svg
+from .render import display_label, render_preview, save_pdf, save_raster, save_svg
 
 APP_NAME = "Feynman Diagram Studio"
 MINIMUM_TK = 8.6
@@ -138,11 +138,11 @@ class StudioApp:
         self.save_button = ttk.Button(self.file_controls, text="Save", command=self.save_document)
         self.latex_button = ttk.Button(self.file_controls, text="LaTeX", command=self.show_latex_dialog)
         self.export_button = ttk.Button(self.file_controls, text="Export…", command=self.show_export_dialog)
-        self.open_button.grid(row=0, column=0, sticky="ew", padx=2, pady=1)
-        self.save_button.grid(row=0, column=1, sticky="ew", padx=2, pady=1)
-        self.latex_button.grid(row=1, column=0, sticky="ew", padx=2, pady=1)
-        self.export_button.grid(row=1, column=1, sticky="ew", padx=2, pady=1)
-        self.file_controls.columnconfigure((0, 1), weight=1)
+        self.open_button.grid(row=0, column=0, sticky="ew", padx=2)
+        self.save_button.grid(row=0, column=1, sticky="ew", padx=2)
+        self.latex_button.grid(row=0, column=2, sticky="ew", padx=2)
+        self.export_button.grid(row=0, column=3, sticky="ew", padx=2)
+        self.file_controls.columnconfigure((0, 1, 2, 3), weight=1)
 
         body = ttk.Panedwindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True)
@@ -361,7 +361,8 @@ class StudioApp:
         self.object_list.delete(0, "end")
         self.object_ids = []
         for index, item in enumerate(self.document.vertices, 1):
-            self.object_list.insert("end", "Vertex {}{}".format(index, " · " + item.label if item.label else ""))
+            label = display_label(item.label)
+            self.object_list.insert("end", "Vertex {}{}".format(index, " · " + label if label else ""))
             self.object_ids.append(item.id)
         for index, item in enumerate(self.document.edges, 1):
             self.object_list.insert("end", "{} {}".format(item.kind.title(), index))
