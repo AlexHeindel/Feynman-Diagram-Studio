@@ -5,8 +5,8 @@ from pathlib import Path
 
 from feynman_studio.geometry import curve, geometry
 from feynman_studio.latex import FORMATS, latex_source, standalone_source
-from feynman_studio.model import Diagram, DiagramError, KINDS, blank_diagram, make_edge, make_vertex, templates
-from feynman_studio.render import display_label, save_pdf, save_raster, svg_document
+from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, make_edge, make_vertex, snap_value, templates
+from feynman_studio.render import display_label, render_preview, save_pdf, save_raster, svg_document
 
 try:
     from PIL import Image
@@ -44,6 +44,14 @@ class ModelTests(unittest.TestCase):
         document = templates()[0]
         document.remove("v3")
         self.assertEqual([edge.id for edge in document.edges], ["e4", "e5"])
+
+    def test_grid_snapping_matches_the_visible_grid(self):
+        self.assertEqual(snap_value(570), 580)
+        self.assertEqual(snap_value(230), 240)
+        for document in templates():
+            for vertex in document.vertices:
+                self.assertEqual(vertex.x % GRID_SIZE, 0)
+                self.assertEqual(vertex.y % GRID_SIZE, 0)
 
 
 class GeometryTests(unittest.TestCase):
@@ -120,6 +128,17 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(display_label(r"p_1"), "p₁")
         self.assertEqual(display_label(r"\bar{q}"), "q̅")
         self.assertEqual(display_label(r"\frac{g^2}{4\pi}"), "(g²)⁄(4π)")
+
+    @unittest.skipUnless(Image is not None, "Pillow is not installed")
+    def test_preview_is_supersampled_and_antialiased(self):
+        document = blank_diagram()
+        start, end = make_vertex(100, 100), make_vertex(620, 380)
+        document.vertices.extend((start, end))
+        document.edges.append(make_edge(start.id, end.id))
+        image = render_preview(document, 360, 240)
+        self.assertEqual(image.size, (360, 240))
+        colors = {color for _, color in image.getcolors(maxcolors=360 * 240)}
+        self.assertTrue(any(color not in ((255, 255, 255, 255), (23, 35, 51, 255)) for color in colors))
 
     @unittest.skipUnless(Image is not None, "Pillow is not installed")
     def test_png_jpeg_and_pdf_exports_are_valid(self):

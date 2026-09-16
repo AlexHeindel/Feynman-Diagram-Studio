@@ -9,7 +9,8 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 - Straight, curved, self-loop, and two-vertex circular paths
 - Forward/reverse arrows and one-, two-, or three-line quark bundles
 - Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
-- Drag vertices and labels; grid snapping; keyboard nudging
+- Antialiased, high-resolution canvas preview
+- Drag vertices and labels; consistent 20-unit grid snapping; keyboard nudging
 - Undo/redo history and local crash-recovery autosave
 - Four starting templates and editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
@@ -61,7 +62,7 @@ Pillow handles PNG/JPEG encoding and ReportLab writes vector PDF pages. The edit
 | `Ctrl/Cmd+Shift+Z` | Redo |
 | `Delete` | Delete selection |
 | Arrow keys | Nudge selected vertex |
-| Shift + arrow keys | Nudge by 10 units |
+| Shift + arrow keys | Nudge farther (two grid steps while snapping) |
 
 ## Build distributable apps
 

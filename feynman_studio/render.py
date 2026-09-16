@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
 from .geometry import geometry
-from .model import HEIGHT, WIDTH, Diagram, Edge, Vertex, bundle_offsets
+from .model import GRID_SIZE, HEIGHT, WIDTH, Diagram, Edge, Vertex, bundle_offsets
 
 Point = Tuple[float, float]
 
@@ -264,17 +264,33 @@ def _draw_dashed(draw, points: Sequence[Point], fill: str, width: int, dash: Seq
                 painting = not painting
 
 
-def render_image(document: Diagram, ppi: int = 600, transparent: bool = False):
+def _render_at_size(
+    document: Diagram,
+    width: int,
+    height: int,
+    transparent: bool = False,
+    show_grid: bool = False,
+):
     from PIL import Image, ImageDraw
 
-    width = round(document.style.widthMm / 25.4 * ppi)
-    height = round(width * 2 / 3)
-    if width * height > 40_000_000:
-        raise ValueError("Choose a smaller page or resolution (40 megapixel limit).")
     scale = width / WIDTH
     background = (255, 255, 255, 0 if transparent else 255)
     image = Image.new("RGBA", (width, height), background)
     draw = ImageDraw.Draw(image)
+    if show_grid:
+        grid_width = max(1, round(scale))
+        for x in range(int(GRID_SIZE), int(WIDTH), int(GRID_SIZE)):
+            draw.line(
+                (x * scale, GRID_SIZE * scale, x * scale, (HEIGHT - GRID_SIZE) * scale),
+                fill="#e8edf2",
+                width=grid_width,
+            )
+        for y in range(int(GRID_SIZE), int(HEIGHT), int(GRID_SIZE)):
+            draw.line(
+                (GRID_SIZE * scale, y * scale, (WIDTH - GRID_SIZE) * scale, y * scale),
+                fill="#e8edf2",
+                width=grid_width,
+            )
     for primitive in make_scene(document):
         if isinstance(primitive, Polyline):
             points = [(round(x * scale), round(y * scale)) for x, y in primitive.points]
@@ -294,6 +310,26 @@ def render_image(document: Diagram, ppi: int = 600, transparent: bool = False):
             font = _font(round(primitive.size * scale))
             draw.text((primitive.point[0] * scale, primitive.point[1] * scale), primitive.value, fill=primitive.color, font=font, anchor="mm")
     return image
+
+
+def render_image(document: Diagram, ppi: int = 600, transparent: bool = False):
+    width = round(document.style.widthMm / 25.4 * ppi)
+    height = round(width * 2 / 3)
+    if width * height > 40_000_000:
+        raise ValueError("Choose a smaller page or resolution (40 megapixel limit).")
+    return _render_at_size(document, width, height, transparent)
+
+
+def render_preview(document: Diagram, width: int, height: int, show_grid: bool = False, oversample: int = 3):
+    """Render an antialiased canvas preview at exactly ``width`` by ``height`` pixels."""
+    from PIL import Image
+
+    width, height = max(1, int(width)), max(1, int(height))
+    oversample = max(1, int(oversample))
+    image = _render_at_size(document, width * oversample, height * oversample, False, show_grid)
+    if oversample == 1:
+        return image
+    return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def save_raster(document: Diagram, path: str | Path, ppi: int = 600, transparent: bool = False) -> None:
@@ -372,28 +408,3 @@ def save_pdf(document: Diagram, path: str | Path, ppi: int = 600) -> None:
             pdf.drawCentredString(x, y - primitive.size * scale * 0.32, value)
     pdf.showPage()
     pdf.save()
-
-
-def draw_tk(canvas, document: Diagram, scale: float, offset: Point, show_grid: bool = False) -> None:
-    canvas.delete("diagram")
-    ox, oy = offset
-    transform = lambda point: (ox + point[0] * scale, oy + point[1] * scale)
-    if show_grid:
-        for x in range(20, 701, 20):
-            canvas.create_line(*transform((x, 20)), *transform((x, 460)), fill="#e8edf2", tags="diagram")
-        for y in range(20, 461, 20):
-            canvas.create_line(*transform((20, y)), *transform((700, y)), fill="#e8edf2", tags="diagram")
-    for primitive in make_scene(document):
-        if isinstance(primitive, Polyline):
-            coordinates = [coordinate for point in primitive.points for coordinate in transform(point)]
-            dash = tuple(max(1, round(value * scale)) for value in primitive.dash) or None
-            canvas.create_line(*coordinates, fill=primitive.color, width=max(1, primitive.width * scale), dash=dash, smooth=False, capstyle="round", joinstyle="round", tags="diagram")
-        elif isinstance(primitive, Polygon):
-            coordinates = [coordinate for point in primitive.points for coordinate in transform(point)]
-            canvas.create_polygon(*coordinates, fill=primitive.color, outline="", tags="diagram")
-        elif isinstance(primitive, Circle):
-            x, y = transform(primitive.center)
-            radius = primitive.radius * scale
-            canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill=primitive.fill or "", outline=primitive.outline or "", width=max(1, primitive.width * scale), tags="diagram")
-        else:
-            canvas.create_text(*transform(primitive.point), text=primitive.value, fill=primitive.color, font=("Times", max(8, round(primitive.size * scale))), tags="diagram")

@@ -26,7 +26,8 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertGreater(app.canvas.winfo_width(), 300)
             self.assertEqual(len(app.tool_buttons), 4)
             self.assertGreater(len(app.document.vertices), 0)
-            self.assertGreater(len(app.canvas.find_all()), 10)
+            self.assertIsNotNone(app.canvas_preview)
+            self.assertGreaterEqual(len(app.canvas.find_all()), len(app.document.vertices) + 2)
             app.set_tool("connect")
             self.assertEqual(app.tool, "connect")
         finally:

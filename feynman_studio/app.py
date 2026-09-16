@@ -13,6 +13,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 from .geometry import distance_to_polyline, geometry
 from .latex import FORMATS, latex_source, standalone_source
 from .model import (
+    GRID_SIZE,
     HEIGHT,
     KINDS,
     MARKERS,
@@ -24,9 +25,10 @@ from .model import (
     blank_diagram,
     make_edge,
     make_vertex,
+    snap_value,
     templates,
 )
-from .render import draw_tk, save_pdf, save_raster, save_svg
+from .render import render_preview, save_pdf, save_raster, save_svg
 
 APP_NAME = "Feynman Diagram Studio"
 MINIMUM_TK = 8.6
@@ -69,10 +71,12 @@ class StudioApp:
         self.drag_kind: Optional[str] = None
         self.drag_id: Optional[str] = None
         self.drag_origin = (0.0, 0.0)
+        self.drag_vertex_offset = (0.0, 0.0)
         self.drag_before: Optional[Diagram] = None
         self.drag_changed = False
         self.current_path: Optional[Path] = None
         self.autosave_job: Optional[str] = None
+        self.canvas_preview = None
 
         self._configure_style()
         self._build_menu()
@@ -114,7 +118,7 @@ class StudioApp:
         menu.add_cascade(label="Edit", menu=edit_menu)
 
         view_menu = tk.Menu(menu, tearoff=False)
-        view_menu.add_checkbutton(label="Snap to Grid", variable=self.snap)
+        view_menu.add_checkbutton(label="Snap to Grid", variable=self.snap, command=self._snap_setting_changed)
         view_menu.add_checkbutton(label="Show Page Grid", variable=self.show_grid, command=self.redraw)
         menu.add_cascade(label="View", menu=view_menu)
 
@@ -234,15 +238,19 @@ class StudioApp:
             vertex = self.document.vertex(self.selected or "")
             if vertex:
                 before = self.document.clone()
-                distance = 10 if event.state & 1 else 1
+                distance = (GRID_SIZE * (2 if event.state & 1 else 1)) if self.snap.get() else (10 if event.state & 1 else 1)
                 if key == "left":
-                    vertex.x = max(20, vertex.x - distance)
+                    value = vertex.x - distance
+                    vertex.x = max(20, snap_value(value) if self.snap.get() else value)
                 elif key == "right":
-                    vertex.x = min(700, vertex.x + distance)
+                    value = vertex.x + distance
+                    vertex.x = min(700, snap_value(value) if self.snap.get() else value)
                 elif key == "up":
-                    vertex.y = max(20, vertex.y - distance)
+                    value = vertex.y - distance
+                    vertex.y = max(20, snap_value(value) if self.snap.get() else value)
                 else:
-                    vertex.y = min(460, vertex.y + distance)
+                    value = vertex.y + distance
+                    vertex.y = min(460, snap_value(value) if self.snap.get() else value)
                 self._record(before)
 
     def _key_delete(self, _event) -> None:
@@ -373,11 +381,17 @@ class StudioApp:
         self.canvas.delete("all")
         scale = min((width - 40) / WIDTH, (height - 40) / HEIGHT)
         scale = max(0.2, scale)
+        page_width = max(1, round(WIDTH * scale))
+        scale = page_width / WIDTH
+        page_height = round(HEIGHT * scale)
         offset = ((width - WIDTH * scale) / 2, (height - HEIGHT * scale) / 2)
         self.canvas_scale, self.canvas_offset = scale, offset
         ox, oy = offset
-        self.canvas.create_rectangle(ox, oy, ox + WIDTH * scale, oy + HEIGHT * scale, fill="white", outline="#b8c1cc", width=1, tags="paper")
-        draw_tk(self.canvas, self.document, scale, offset, self.show_grid.get())
+        from PIL import ImageTk
+
+        self.canvas_preview = ImageTk.PhotoImage(render_preview(self.document, page_width, page_height, self.show_grid.get()))
+        self.canvas.create_image(ox, oy, image=self.canvas_preview, anchor="nw", tags="paper")
+        self.canvas.create_rectangle(ox, oy, ox + page_width, oy + page_height, fill="", outline="#b8c1cc", width=1, tags="paper")
         for vertex in self.document.vertices:
             x, y = self._screen(vertex.x, vertex.y)
             radius = 7 if vertex.id == self.selected or vertex.id == self.connection_start else 4
@@ -412,6 +426,32 @@ class StudioApp:
 
     def _inside_page(self, x: float, y: float) -> bool:
         return 0 <= x <= WIDTH and 0 <= y <= HEIGHT
+
+    @staticmethod
+    def _snap_document(document: Diagram) -> None:
+        for vertex in document.vertices:
+            vertex.x = max(20, min(700, snap_value(vertex.x)))
+            vertex.y = max(20, min(460, snap_value(vertex.y)))
+
+    def _snap_setting_changed(self) -> None:
+        if not self.snap.get():
+            self.status.set("Grid snapping off")
+            return
+        before = self.document.clone()
+        self._snap_document(self.document)
+        if self.document != before:
+            self._record(before, "Vertices aligned to grid")
+        else:
+            self.status.set("Grid snapping on")
+            self.redraw()
+
+    def _set_vertex_coordinate(self, vertex: Optional[Vertex], attribute: str, value: float) -> None:
+        if vertex is None:
+            return
+        if self.snap.get():
+            value = snap_value(value)
+        minimum, maximum = (20, 700) if attribute == "x" else (20, 460)
+        setattr(vertex, attribute, max(minimum, min(maximum, value)))
 
     def _nearest_vertex(self, x: float, y: float) -> Optional[Vertex]:
         candidates = [(math.hypot(item.x - x, item.y - y), item) for item in self.document.vertices]
@@ -455,7 +495,7 @@ class StudioApp:
                 messagebox.showerror("Vertex limit", "A project may contain at most 150 vertices.")
                 return
             if self.snap.get():
-                x, y = round(x / 10) * 10, round(y / 10) * 10
+                x, y = snap_value(x), snap_value(y)
             item = make_vertex(max(20, min(700, x)), max(20, min(460, y)), visible=True)
             self.commit(lambda document: document.vertices.append(item), "Vertex added")
             self.selected = item.id
@@ -483,6 +523,8 @@ class StudioApp:
         if self.drag_id:
             self.drag_before = self.document.clone()
             self.drag_origin = (x, y)
+            if self.drag_kind == "vertex" and vertex:
+                self.drag_vertex_offset = (vertex.x - x, vertex.y - y)
             self.drag_changed = False
         self._rebuild_inspector()
         self.redraw()
@@ -493,13 +535,12 @@ class StudioApp:
         x, y = self._document_point(event)
         old_x, old_y = self.drag_origin
         dx, dy = x - old_x, y - old_y
-        self.drag_origin = (x, y)
         if self.drag_kind == "vertex":
             vertex = self.document.vertex(self.drag_id)
             if vertex:
-                nx, ny = vertex.x + dx, vertex.y + dy
+                nx, ny = x + self.drag_vertex_offset[0], y + self.drag_vertex_offset[1]
                 if self.snap.get():
-                    nx, ny = round(nx / 10) * 10, round(ny / 10) * 10
+                    nx, ny = snap_value(nx), snap_value(ny)
                 vertex.x, vertex.y = max(20, min(700, nx)), max(20, min(460, ny))
         elif self.drag_kind == "vertex_label":
             vertex = self.document.vertex(self.drag_id)
@@ -513,6 +554,7 @@ class StudioApp:
                 if start and end:
                     _, middle = geometry(start, end, edge)
                     edge.labelOffset = max(-120, min(120, edge.labelOffset + dx * middle.nx + dy * middle.ny))
+        self.drag_origin = (x, y)
         self.drag_changed = True
         self.redraw()
 
@@ -625,8 +667,10 @@ class StudioApp:
         if vertex:
             self._section("Vertex")
             self._entry("Label (TeX)", vertex.label, lambda value: self.commit(lambda document: setattr(document.vertex(vertex.id), "label", value)))
-            for label, attribute, minimum, maximum in (("X position", "x", 20, 700), ("Y position", "y", 20, 460), ("Label X", "labelX", -150, 150), ("Label Y", "labelY", -150, 150)):
-                self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.vertex(vertex.id), attr, value)), minimum, maximum))
+            for label, attribute, minimum, maximum in (("X position", "x", 20, 700), ("Y position", "y", 20, 460)):
+                self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: self._set_vertex_coordinate(document.vertex(vertex.id), attr, value)), minimum, maximum))
+            for label, attribute in (("Label X", "labelX"), ("Label Y", "labelY")):
+                self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.vertex(vertex.id), attr, value)), -150, 150))
             marker_names = ("None", "Dot", "Open", "Filled", "Hatched", "Crosshatched", "Dotted")
             self._choice("Vertex style", vertex.marker.title(), marker_names, lambda value: self.commit(lambda document: self._set_marker(document.vertex(vertex.id), value.lower())))
             if vertex.marker not in ("none", "dot"):
@@ -659,7 +703,7 @@ class StudioApp:
         self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
         self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))
         self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
-        ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap).pack(anchor="w", pady=(7, 0))
+        ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
         ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
 
         self._section("Objects")
@@ -847,6 +891,8 @@ class StudioApp:
             path = self._autosave_path()
             if path.exists():
                 self.document = Diagram.from_json(path.read_text(encoding="utf-8"))
+                if self.snap.get():
+                    self._snap_document(self.document)
                 self.status.set("Restored local draft")
                 self.title_label.configure(text=self.document.title)
                 self._rebuild_inspector()
@@ -856,7 +902,7 @@ class StudioApp:
     def _show_shortcuts(self) -> None:
         messagebox.showinfo(
             "Keyboard shortcuts",
-            "V  Select\nA  Add vertex\nC  Connect vertices\nL  Add loop\n\nCtrl+Z  Undo\nCtrl+Shift+Z  Redo\nDelete  Remove selection\nArrow keys  Nudge selected vertex\nShift+Arrow  Nudge by 10",
+            "V  Select\nA  Add vertex\nC  Connect vertices\nL  Add loop\n\nCtrl+Z  Undo\nCtrl+Shift+Z  Redo\nDelete  Remove selection\nArrow keys  Nudge selected vertex\nShift+Arrow  Nudge farther",
         )
 
 

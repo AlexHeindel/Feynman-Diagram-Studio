@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List
 
 WIDTH = 720.0
 HEIGHT = 480.0
+GRID_SIZE = 20.0
 KINDS = ("fermion", "photon", "gluon", "scalar", "ghost")
 MARKERS = ("none", "dot", "open", "filled", "hatched", "crosshatched", "dotted")
 ARROWS = ("forward", "reverse", "none")
@@ -254,6 +255,10 @@ def bundle_offsets(edge: Edge) -> Iterable[float]:
     return tuple((index - (count - 1) / 2) * edge.bundleSpacing for index in range(count))
 
 
+def snap_value(value: float) -> float:
+    return math.floor(value / GRID_SIZE + 0.5) * GRID_SIZE
+
+
 def blank_diagram() -> Diagram:
     return Diagram()
 
@@ -282,12 +287,12 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Electron–positron annihilation",
             vertices=[
-                _vertex("v1", 110, 105, "e^{-}"),
-                _vertex("v2", 110, 375, "e^{+}"),
+                _vertex("v1", 100, 100, "e^{-}"),
+                _vertex("v2", 100, 380, "e^{+}"),
                 _vertex("v3", 280, 240, visible=True),
                 _vertex("v4", 440, 240, visible=True),
-                _vertex("v5", 610, 105, r"\mu^{-}"),
-                _vertex("v6", 610, 375, r"\mu^{+}"),
+                _vertex("v5", 620, 100, r"\mu^{-}"),
+                _vertex("v6", 620, 380, r"\mu^{+}"),
             ],
             edges=[
                 _edge("e1", "v1", "v3"),
@@ -300,12 +305,12 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Electron scattering",
             vertices=[
-                _vertex("v1", 110, 110, "e^{-}"),
-                _vertex("v2", 110, 370, "e^{-}"),
-                _vertex("v3", 360, 110, visible=True),
-                _vertex("v4", 360, 370, visible=True),
-                _vertex("v5", 610, 110, "e^{-}"),
-                _vertex("v6", 610, 370, "e^{-}"),
+                _vertex("v1", 100, 100, "e^{-}"),
+                _vertex("v2", 100, 380, "e^{-}"),
+                _vertex("v3", 360, 100, visible=True),
+                _vertex("v4", 360, 380, visible=True),
+                _vertex("v5", 620, 100, "e^{-}"),
+                _vertex("v6", 620, 380, "e^{-}"),
             ],
             edges=[
                 _edge("e1", "v1", "v3"),
@@ -318,10 +323,10 @@ def templates() -> List[Diagram]:
         Diagram(
             title="One-loop self-energy",
             vertices=[
-                _vertex("v1", 95, 290, "e^{-}"),
-                _vertex("v2", 260, 290, visible=True),
-                _vertex("v3", 460, 290, visible=True),
-                _vertex("v4", 625, 290, "e^{-}"),
+                _vertex("v1", 100, 300, "e^{-}"),
+                _vertex("v2", 260, 300, visible=True),
+                _vertex("v3", 460, 300, visible=True),
+                _vertex("v4", 620, 300, "e^{-}"),
             ],
             edges=[
                 _edge("e1", "v1", "v2"),
@@ -333,12 +338,12 @@ def templates() -> List[Diagram]:
         Diagram(
             title="Quark scattering",
             vertices=[
-                _vertex("v1", 110, 110, "q"),
-                _vertex("v2", 110, 370, "q"),
-                _vertex("v3", 360, 110, visible=True),
-                _vertex("v4", 360, 370, visible=True),
-                _vertex("v5", 610, 110, "q"),
-                _vertex("v6", 610, 370, "q"),
+                _vertex("v1", 100, 100, "q"),
+                _vertex("v2", 100, 380, "q"),
+                _vertex("v3", 360, 100, visible=True),
+                _vertex("v4", 360, 380, visible=True),
+                _vertex("v5", 620, 100, "q"),
+                _vertex("v6", 620, 380, "q"),
             ],
             edges=[
                 _edge("e1", "v1", "v3"),
