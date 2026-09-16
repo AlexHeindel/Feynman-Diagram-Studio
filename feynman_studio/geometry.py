@@ -104,7 +104,10 @@ def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[
         fraction = (distance - lengths[cursor - 1]) / (segment or 1)
         point = sample((cursor - 1 + fraction) / 200)
         phase = 2 * math.pi * cycles * index / count
-        taper = min(1, index / 8, (count - index) / 8)
+        if edge.kind == "gluon":
+            taper = min(1, distance / 15, (length - distance) / 15)
+        else:
+            taper = min(1, index / 8, (count - index) / 8)
         normal = 5 * math.sin(phase) if edge.kind == "photon" else 7 * math.sin(phase) if edge.kind == "gluon" else 0
         along = 6 * (math.cos(phase) - 1) * taper if edge.kind == "gluon" else 0
         points.append((point.x + point.nx * normal * taper + point.tx * along, point.y + point.ny * normal * taper + point.ty * along))

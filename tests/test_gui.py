@@ -25,6 +25,11 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertGreater(root.winfo_width(), 900)
             self.assertGreater(app.canvas.winfo_width(), 300)
             self.assertEqual(len(app.tool_buttons), 4)
+            labels = [button.cget("text") for button in app.tool_buttons.values()]
+            self.assertEqual(labels, ["Select", "Vertex", "Connect", "Loop"])
+            self.assertEqual(app.open_button.cget("text"), "Open")
+            self.assertIs(app.undo_button.master, app.history_controls)
+            self.assertIs(app.redo_button.master, app.history_controls)
             self.assertGreater(len(app.document.vertices), 0)
             self.assertIsNotNone(app.canvas_preview)
             self.assertGreaterEqual(len(app.canvas.find_all()), len(app.document.vertices) + 2)

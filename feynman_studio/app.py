@@ -133,17 +133,15 @@ class StudioApp:
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="⚛  " + APP_NAME, style="Heading.TLabel").pack(side="left", padx=(2, 18))
         self.tool_buttons = {}
-        for key, label in (("select", "Select (V)"), ("vertex", "Vertex (A)"), ("connect", "Connect (C)"), ("loop", "Loop (L)")):
+        for key, label in (("select", "Select"), ("vertex", "Vertex"), ("connect", "Connect"), ("loop", "Loop")):
             button = ttk.Button(toolbar, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
             button.pack(side="left", padx=2)
             self.tool_buttons[key] = button
-        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
-        ttk.Button(toolbar, text="↶ Undo", command=self.undo).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="↷ Redo", command=self.redo).pack(side="left", padx=2)
         ttk.Button(toolbar, text="Export…", command=self.show_export_dialog).pack(side="right", padx=2)
         ttk.Button(toolbar, text="LaTeX", command=self.show_latex_dialog).pack(side="right", padx=2)
         ttk.Button(toolbar, text="Save", command=self.save_document).pack(side="right", padx=2)
-        ttk.Button(toolbar, text="Open", command=self.open_document).pack(side="right", padx=2)
+        self.open_button = ttk.Button(toolbar, text="Open", command=self.open_document)
+        self.open_button.pack(side="right", padx=2)
 
         body = ttk.Panedwindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True)
@@ -154,6 +152,12 @@ class StudioApp:
         body.add(center, weight=1)
         body.add(inspector_host, weight=0)
 
+        self.history_controls = ttk.Frame(self.library)
+        self.history_controls.pack(fill="x", pady=(0, 10))
+        self.undo_button = ttk.Button(self.history_controls, text="↶ Undo", command=self.undo)
+        self.undo_button.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.redo_button = ttk.Button(self.history_controls, text="↷ Redo", command=self.redo)
+        self.redo_button.pack(side="left", fill="x", expand=True, padx=(2, 0))
         ttk.Label(self.library, text="STARTING POINTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
         ttk.Button(self.library, text="＋ New blank diagram", command=self.new_document).pack(fill="x", pady=(0, 8))
         self.template_list = tk.Listbox(self.library, exportselection=False, height=12, activestyle="dotbox")

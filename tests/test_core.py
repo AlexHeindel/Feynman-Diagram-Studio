@@ -84,6 +84,11 @@ class GeometryTests(unittest.TestCase):
         self.assertLess(middle.y, 170)
         self.assertTrue(all(math.isfinite(value) for pair in points for value in pair))
 
+    def test_gluon_curls_stay_between_straight_line_endpoints(self):
+        top, bottom = make_vertex(360, 100), make_vertex(360, 380)
+        points, _ = geometry(top, bottom, make_edge(top.id, bottom.id, "gluon"))
+        self.assertTrue(all(top.y <= y <= bottom.y for _, y in points))
+
 
 class ExportTests(unittest.TestCase):
     def test_svg_has_physical_size_and_escapes_labels(self):
