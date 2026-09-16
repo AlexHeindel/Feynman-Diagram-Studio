@@ -132,11 +132,6 @@ class StudioApp:
         toolbar = ttk.Frame(self.root, padding=(8, 6))
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="⚛  " + APP_NAME, style="Heading.TLabel").pack(side="left", padx=(2, 18))
-        self.tool_buttons = {}
-        for key, label in (("select", "Select"), ("vertex", "Vertex"), ("connect", "Connect"), ("loop", "Loop")):
-            button = ttk.Button(toolbar, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
-            button.pack(side="left", padx=2)
-            self.tool_buttons[key] = button
         ttk.Button(toolbar, text="Export…", command=self.show_export_dialog).pack(side="right", padx=2)
         ttk.Button(toolbar, text="LaTeX", command=self.show_latex_dialog).pack(side="right", padx=2)
         ttk.Button(toolbar, text="Save", command=self.save_document).pack(side="right", padx=2)
@@ -163,15 +158,29 @@ class StudioApp:
         self.template_list = tk.Listbox(self.library, exportselection=False, height=12, activestyle="dotbox")
         for document in templates():
             self.template_list.insert("end", document.title)
-        self.template_list.pack(fill="both", expand=True)
+        self.template_list.pack(fill="x")
         self.template_list.bind("<<ListboxSelect>>", self._load_selected_template)
+        ttk.Separator(self.library).pack(fill="x", pady=(12, 8))
+        ttk.Label(self.library, text="OBJECTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
+        self.object_list = tk.Listbox(self.library, exportselection=False, activestyle="dotbox")
+        self.object_list.pack(fill="both", expand=True)
+        self.object_list.bind("<<ListboxSelect>>", self._select_object)
         ttk.Label(self.library, text="Version 0.1 · Native prototype", foreground="#64748b").pack(anchor="w", pady=(8, 0))
 
         heading = ttk.Frame(center)
         heading.pack(fill="x", pady=(0, 6))
-        ttk.Label(heading, text="FEYNMAN DIAGRAM", style="Eyebrow.TLabel").pack(anchor="w")
-        self.title_label = ttk.Label(heading, text=self.document.title, style="Heading.TLabel")
+        title_block = ttk.Frame(heading)
+        title_block.pack(side="left")
+        ttk.Label(title_block, text="FEYNMAN DIAGRAM", style="Eyebrow.TLabel").pack(anchor="w")
+        self.title_label = ttk.Label(title_block, text=self.document.title, style="Heading.TLabel")
         self.title_label.pack(anchor="w")
+        self.diagram_tools = ttk.Frame(heading)
+        self.diagram_tools.pack(side="right", padx=(12, 0))
+        self.tool_buttons = {}
+        for key, label in (("select", "Select"), ("vertex", "Vertex"), ("connect", "Connect"), ("loop", "Loop")):
+            button = ttk.Button(self.diagram_tools, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
+            button.pack(side="left", padx=2)
+            self.tool_buttons[key] = button
         self.canvas = tk.Canvas(center, background="#dfe5eb", highlightthickness=0, cursor="arrow")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda event: self.redraw())
@@ -334,6 +343,27 @@ class StudioApp:
         selection = self.template_list.curselection()
         if selection:
             self._replace_document(templates()[selection[0]], "Template loaded")
+
+    def _select_object(self, _event=None) -> None:
+        selection = self.object_list.curselection()
+        if selection and selection[0] < len(self.object_ids):
+            self.selected = self.object_ids[selection[0]]
+            self._rebuild_inspector()
+            self.redraw()
+
+    def _rebuild_object_list(self) -> None:
+        self.object_list.delete(0, "end")
+        self.object_ids = []
+        for index, item in enumerate(self.document.vertices, 1):
+            self.object_list.insert("end", "Vertex {}{}".format(index, " · " + item.label if item.label else ""))
+            self.object_ids.append(item.id)
+        for index, item in enumerate(self.document.edges, 1):
+            self.object_list.insert("end", "{} {}".format(item.kind.title(), index))
+            self.object_ids.append(item.id)
+        if self.selected in self.object_ids:
+            selected_index = self.object_ids.index(self.selected)
+            self.object_list.selection_set(selected_index)
+            self.object_list.see(selected_index)
 
     def open_document(self) -> None:
         path = filedialog.askopenfilename(title="Open diagram", filetypes=(("Feynman Diagram Studio project", "*.feynman.json"), ("JSON files", "*.json"), ("All files", "*.*")))
@@ -709,29 +739,7 @@ class StudioApp:
         self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
         ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
         ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
-
-        self._section("Objects")
-        object_list = tk.Listbox(self.inspector, height=min(9, max(3, len(self.document.vertices) + len(self.document.edges))), exportselection=False)
-        object_ids = []
-        for index, item in enumerate(self.document.vertices, 1):
-            object_list.insert("end", "Vertex {}{}".format(index, " · " + item.label if item.label else ""))
-            object_ids.append(item.id)
-        for index, item in enumerate(self.document.edges, 1):
-            object_list.insert("end", "{} {}".format(item.kind.title(), index))
-            object_ids.append(item.id)
-        if self.selected in object_ids:
-            object_list.selection_set(object_ids.index(self.selected))
-            object_list.see(object_ids.index(self.selected))
-        object_list.pack(fill="x")
-
-        def select_object(_event):
-            selection = object_list.curselection()
-            if selection:
-                self.selected = object_ids[selection[0]]
-                self._rebuild_inspector()
-                self.redraw()
-
-        object_list.bind("<<ListboxSelect>>", select_object)
+        self._rebuild_object_list()
 
     def _set_loop_mode(self, value: str) -> None:
         self.loop_mode = "single" if value == "Single vertex" else "double"

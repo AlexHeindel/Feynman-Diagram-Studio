@@ -88,6 +88,7 @@ class GeometryTests(unittest.TestCase):
         top, bottom = make_vertex(360, 100), make_vertex(360, 380)
         points, _ = geometry(top, bottom, make_edge(top.id, bottom.id, "gluon"))
         self.assertTrue(all(top.y <= y <= bottom.y for _, y in points))
+        self.assertGreater(max(abs(x - top.x) for x, _ in points[-24:]), 6.5)
 
 
 class ExportTests(unittest.TestCase):
