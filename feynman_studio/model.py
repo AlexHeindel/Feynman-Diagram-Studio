@@ -276,9 +276,17 @@ def _edge(
     kind: str = "fermion",
     label: str = "",
     curvature: float = 0,
+    *,
+    arrow: str | None = None,
+    color: str = "#172333",
+    circular: bool = False,
 ) -> Edge:
     item = make_edge(start, end, kind, label, curvature)
     item.id = name
+    if arrow is not None:
+        item.arrow = arrow
+    item.color = color
+    item.circular = circular
     return item
 
 
@@ -351,6 +359,131 @@ def templates() -> List[Diagram]:
                 _edge("e3", "v2", "v4"),
                 _edge("e4", "v4", "v6"),
                 _edge("e5", "v3", "v4", "gluon", "g"),
+            ],
+        ),
+        Diagram(
+            title="Top-pair Higgs production",
+            vertices=[
+                _vertex("v1", 80, 120, "g"),
+                _vertex("v2", 80, 360, "g"),
+                _vertex("v3", 240, 140, visible=True),
+                _vertex("v4", 240, 340, visible=True),
+                _vertex("v5", 440, 240, visible=True),
+                _vertex("v6", 640, 80, "t"),
+                _vertex("v7", 640, 400, r"\bar{t}"),
+                _vertex("v8", 640, 240, "H"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v3", "gluon", color="#059669"),
+                _edge("e2", "v2", "v4", "gluon", color="#059669"),
+                _edge("e3", "v3", "v6"),
+                _edge("e4", "v5", "v3"),
+                _edge("e5", "v4", "v5"),
+                _edge("e6", "v7", "v4"),
+                _edge("e7", "v5", "v8", "scalar"),
+            ],
+        ),
+        Diagram(
+            title="Penguin diagram",
+            vertices=[
+                _vertex("v1", 60, 120, "b"),
+                _vertex("v2", 220, 120, visible=True),
+                _vertex("v3", 500, 120, visible=True),
+                _vertex("v4", 660, 120, "s"),
+                _vertex("v5", 360, 300, visible=True),
+                _vertex("v6", 360, 380, visible=True),
+                _vertex("v7", 120, 420, "q"),
+                _vertex("v8", 600, 420, r"\bar{q}"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v2"),
+                _edge("e2", "v2", "v3", "photon", "W"),
+                _edge("e3", "v3", "v4"),
+                _edge("e4", "v2", "v5", label="t", curvature=60),
+                _edge("e5", "v5", "v3", label="t", curvature=60),
+                _edge("e6", "v5", "v6", "gluon", "g"),
+                _edge("e7", "v7", "v6"),
+                _edge("e8", "v6", "v8"),
+            ],
+        ),
+        Diagram(
+            title="Kaon decay to three pions",
+            vertices=[
+                _vertex("v1", 60, 120, "u"),
+                _vertex("v2", 240, 120, visible=True),
+                _vertex("v3", 60, 320, r"\bar{s}"),
+                _vertex("v4", 220, 320, visible=True),
+                _vertex("v5", 400, 220, visible=True),
+                _vertex("v6", 500, 340, visible=True),
+                _vertex("v7", 660, 60, "u"),
+                _vertex("v8", 660, 140, r"\bar{d}"),
+                _vertex("v9", 660, 260, "u"),
+                _vertex("v10", 660, 340, r"\bar{d}"),
+                _vertex("v11", 660, 400, "d"),
+                _vertex("v12", 660, 440, r"\bar{u}"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v2"),
+                _edge("e2", "v2", "v7"),
+                _edge("e3", "v3", "v4", arrow="reverse"),
+                _edge("e4", "v12", "v4"),
+                _edge("e5", "v4", "v5", "photon", r"W^{+}"),
+                _edge("e6", "v8", "v5"),
+                _edge("e7", "v5", "v9"),
+                _edge("e8", "v5", "v6", "gluon", "g"),
+                _edge("e9", "v10", "v6"),
+                _edge("e10", "v6", "v11"),
+            ],
+        ),
+        Diagram(
+            title="Compton scattering",
+            vertices=[
+                _vertex("v1", 80, 140, "e^{-}"),
+                _vertex("v2", 280, 220, visible=True),
+                _vertex("v3", 440, 260, visible=True),
+                _vertex("v4", 640, 340, "e^{-}"),
+                _vertex("v5", 80, 380, r"\gamma"),
+                _vertex("v6", 640, 100, r"\gamma"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v2"),
+                _edge("e2", "v2", "v3"),
+                _edge("e3", "v3", "v4"),
+                _edge("e4", "v5", "v2", "photon"),
+                _edge("e5", "v3", "v6", "photon"),
+            ],
+        ),
+        Diagram(
+            title="Muon decay",
+            vertices=[
+                _vertex("v1", 80, 240, r"\mu^{-}"),
+                _vertex("v2", 280, 240, visible=True),
+                _vertex("v3", 440, 240, visible=True),
+                _vertex("v4", 640, 100, r"\nu_{\mu}"),
+                _vertex("v5", 640, 300, "e^{-}"),
+                _vertex("v6", 640, 420, r"\bar{\nu}_{e}"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v2"),
+                _edge("e2", "v2", "v4"),
+                _edge("e3", "v2", "v3", "photon", r"W^{-}"),
+                _edge("e4", "v3", "v5"),
+                _edge("e5", "v6", "v3"),
+            ],
+        ),
+        Diagram(
+            title="Vacuum polarization",
+            vertices=[
+                _vertex("v1", 80, 240, r"\gamma"),
+                _vertex("v2", 240, 240, visible=True),
+                _vertex("v3", 480, 240, visible=True),
+                _vertex("v4", 640, 240, r"\gamma"),
+            ],
+            edges=[
+                _edge("e1", "v1", "v2", "photon"),
+                _edge("e2", "v3", "v4", "photon"),
+                _edge("e3", "v2", "v3", label="e^{-}", curvature=100, circular=True),
+                _edge("e4", "v2", "v3", label="e^{+}", curvature=-100, arrow="reverse", circular=True),
             ],
         ),
     ]

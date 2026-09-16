@@ -21,6 +21,21 @@ class ModelTests(unittest.TestCase):
             self.assertIn('"from":', document.to_json())
             self.assertNotIn('"from_":', document.to_json())
 
+    def test_template_library_includes_reference_and_common_examples(self):
+        documents = templates()
+        titles = {document.title for document in documents}
+        self.assertEqual(len(documents), 10)
+        self.assertTrue(
+            {
+                "Top-pair Higgs production",
+                "Penguin diagram",
+                "Kaon decay to three pions",
+                "Compton scattering",
+                "Muon decay",
+                "Vacuum polarization",
+            }.issubset(titles)
+        )
+
     def test_invalid_projects_are_rejected(self):
         base = templates()[0].to_dict()
         cases = []

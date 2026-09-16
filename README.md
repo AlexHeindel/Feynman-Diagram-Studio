@@ -12,7 +12,7 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 - Antialiased, high-resolution canvas preview
 - Drag vertices and labels; consistent 20-unit grid snapping; keyboard nudging
 - Undo/redo history and local crash-recovery autosave
-- Four starting templates and editable JSON project files
+- Ten starting templates and editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
 - LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
 
