@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
-from .geometry import geometry
+from .geometry import edge_label_position, geometry
 from .model import GRID_SIZE, HEIGHT, WIDTH, Diagram, Edge, Vertex, bundle_offsets
 
 Point = Tuple[float, float]
@@ -218,7 +218,7 @@ def make_scene(document: Diagram) -> List[Primitive]:
         if edge.label:
             scene.append(
                 Text(
-                    (middle.x + middle.nx * edge.labelOffset, middle.y + middle.ny * edge.labelOffset),
+                    edge_label_position(middle, edge),
                     display_label(edge.label),
                     edge.color,
                     font,

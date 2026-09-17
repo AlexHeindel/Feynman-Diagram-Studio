@@ -12,7 +12,7 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 - Forward/reverse arrows and one-, two-, or three-line quark bundles
 - Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
 - Antialiased, high-resolution canvas preview
-- Drag vertices and labels; consistent 20-unit grid snapping; keyboard nudging
+- Click labels to select vertices or propagators; drag labels freely in both directions; consistent 20-unit grid snapping for vertices; keyboard nudging
 - Undo/redo history and local crash-recovery autosave
 - Ten starting templates and editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
@@ -166,6 +166,16 @@ python -m unittest discover -s tests -v
 ```
 
 The headless test suite covers project compatibility and validation, all propagator geometry, loops, marker and line rendering, SVG safety, and all six LaTeX exporters.
+
+For actual LaTeX rendering checks, install TeX Live with TikZ-Feynman, TikZ-FeynHand, feynMP/feynMF, PST-Feyn, and axodraw2, plus Ghostscript and Poppler's `pdftoppm`. The test runner searches `FDS_TEX_BIN`, the project-local `.texlive/bin/*` directory, and `PATH` for the TeX tools; it also searches `.texlive/ghostscript/bin` for Ghostscript. Run:
+
+```bash
+FDS_REQUIRE_LATEX=1 python -m unittest discover -s tests -v
+```
+
+This compiles and decodes all ten sample templates and three feature diagrams with every LaTeX format. It checks page bounds and visible output, rendered colors where supported, and the presence and placement of formatted vertex and edge labels against a label-free reference. Without the toolchain, these compilation tests skip unless `FDS_REQUIRE_LATEX=1` is set.
+
+feynMF renders in monochrome. feynMP and feynMF use their libraries' native path layout for curves, which can differ from the editor's sampled curves; the other four LaTeX exporters use sampled paths.
 
 ## License
 

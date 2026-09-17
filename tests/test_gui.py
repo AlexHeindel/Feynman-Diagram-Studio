@@ -1,8 +1,11 @@
 import tkinter as tk
 import unittest
 import sys
+import subprocess
+from types import SimpleNamespace
 
 from feynman_studio.app import StudioApp, check_tk_version
+from feynman_studio.model import blank_diagram, make_edge, make_vertex
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -14,6 +17,14 @@ class GuiSmokeTests(unittest.TestCase):
     def test_editor_constructs_and_renders_native_widgets(self):
         if sys.platform == "darwin" and tk.TkVersion < 8.6:
             self.skipTest("macOS system Tk 8.5 is obsolete; release builds bundle modern Tk")
+        if sys.platform == "darwin":
+            probe = subprocess.run(
+                [sys.executable, "-c", "import tkinter as tk; root = tk.Tk(); root.destroy()"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if probe.returncode:
+                self.skipTest("The macOS window server is unavailable")
         try:
             root = tk.Tk()
         except tk.TclError as exc:
@@ -44,6 +55,40 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(app.tool, "connect")
         finally:
             root.destroy()
+
+    def test_clicking_any_label_selects_and_propagator_label_drags_freely(self):
+        app = StudioApp.__new__(StudioApp)
+        start, end = make_vertex(100, 100, "a"), make_vertex(620, 100, "b")
+        edge = make_edge(start.id, end.id, label="p")
+        app.document = blank_diagram()
+        app.document.vertices.extend((start, end))
+        app.document.edges.append(edge)
+        app.selected = None
+        app.tool = "select"
+        app.canvas_scale = 1
+        app.canvas_offset = (0, 0)
+        app.drag_kind = app.drag_id = app.drag_before = None
+        app.drag_changed = False
+        app.past, app.future = [], []
+        app.status = SimpleNamespace(set=lambda value: None)
+        app.redraw = lambda: None
+        app._rebuild_inspector = lambda: None
+        app._changed = lambda: None
+
+        def event_at(x, y):
+            return SimpleNamespace(x=x, y=y)
+
+        app._canvas_down(event_at(100, 70))
+        self.assertEqual(app.selected, start.id)
+        app._canvas_up(None)
+        app._canvas_down(event_at(360, 75))
+        self.assertEqual(app.selected, edge.id)
+        app._canvas_drag(event_at(400, 105))
+        app._canvas_up(None)
+        self.assertEqual((edge.labelX, edge.labelY), (40, 30))
+        self.assertEqual(len(app.past), 1)
+        app.undo()
+        self.assertEqual((app.document.edges[0].labelX, app.document.edges[0].labelY), (0, 0))
 
 
 if __name__ == "__main__":

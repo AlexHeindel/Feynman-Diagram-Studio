@@ -114,6 +114,13 @@ def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[
     return points, sample(0.5)
 
 
+def edge_label_position(middle: Sample, edge: Edge) -> Tuple[float, float]:
+    return (
+        middle.x + middle.nx * edge.labelOffset + edge.labelX,
+        middle.y + middle.ny * edge.labelOffset + edge.labelY,
+    )
+
+
 def distance_to_polyline(x: float, y: float, points: Sequence[Tuple[float, float]]) -> float:
     best = float("inf")
     for (ax, ay), (bx, by) in zip(points, points[1:]):

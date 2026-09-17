@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .venv/
+.texlive/
 build/
 dist/
 *.spec

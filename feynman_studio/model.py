@@ -41,6 +41,8 @@ class Edge:
     label: str = ""
     curvature: float = 0.0
     labelOffset: float = -25.0
+    labelX: float = 0.0
+    labelY: float = 0.0
     arrow: str = "forward"
     color: str = "#172333"
     bundle: int = 1
@@ -133,6 +135,8 @@ class Diagram:
                 label=_text(raw, "label", 0, 200),
                 curvature=_number(raw, "curvature", -220, 220),
                 labelOffset=_number(raw, "labelOffset", -120, 120),
+                labelX=_number(raw, "labelX", -150, 150, 0),
+                labelY=_number(raw, "labelY", -150, 150, 0),
                 arrow=raw.get("arrow", "none"),
                 color=raw.get("color", ""),
                 bundle=int(_number(raw, "bundle", 1, 3, 1)),

@@ -6,7 +6,7 @@ from pathlib import Path
 from feynman_studio.geometry import curve, geometry
 from feynman_studio.latex import FORMATS, latex_source, standalone_source
 from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, make_edge, make_vertex, snap_value, templates
-from feynman_studio.render import _label_runs, display_label, render_preview, save_pdf, save_raster, svg_document
+from feynman_studio.render import Text, _label_runs, display_label, make_scene, render_preview, save_pdf, save_raster, svg_document
 
 try:
     from PIL import Image
@@ -20,6 +20,20 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(Diagram.from_json(document.to_json()), document)
             self.assertIn('"from":', document.to_json())
             self.assertNotIn('"from_":', document.to_json())
+
+    def test_old_projects_load_and_new_label_coordinates_round_trip(self):
+        source = templates()[0].to_dict()
+        for edge in source["edges"]:
+            edge.pop("labelX")
+            edge.pop("labelY")
+        document = Diagram.from_dict(source)
+        self.assertTrue(all(edge.labelX == edge.labelY == 0 for edge in document.edges))
+        document.edges[0].labelX = 35
+        document.edges[0].labelY = -18
+        self.assertEqual(Diagram.from_json(document.to_json()), document)
+        source["edges"][0]["labelX"] = float("inf")
+        with self.assertRaises(DiagramError):
+            Diagram.from_dict(source)
 
     def test_template_library_includes_reference_and_common_examples(self):
         documents = templates()
@@ -116,6 +130,23 @@ class GeometryTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_moved_propagator_label_appears_at_same_position_in_exports(self):
+        document = blank_diagram()
+        start, end = make_vertex(100, 200), make_vertex(620, 200)
+        edge = make_edge(start.id, end.id, label="p")
+        edge.labelX, edge.labelY = 40, 30
+        document.vertices.extend((start, end))
+        document.edges.append(edge)
+        self.assertIn((400, 205), [item.point for item in make_scene(document) if isinstance(item, Text)])
+        self.assertIn('x="400.000" y="205.000"', svg_document(document))
+        self.assertIn("at (400,205)", latex_source(document, "tikz-feynman"))
+        for format_name in ("feynmp", "feynmf"):
+            source = latex_source(document, format_name)
+            self.assertIn(r"\begin{fmfgraph*}", source)
+            self.assertIn(r"\fmfiv{l=$p$,l.a=0,l.d=0}{(0.555556w,0.572917h)}", source)
+        self.assertIn(r"\rput(400,275)", latex_source(document, "pst-feyn"))
+        self.assertIn(r"\Text(189.7,130.4)", latex_source(document, "axodraw2"))
+
     def test_svg_has_physical_size_and_escapes_labels(self):
         document = templates()[0]
         document.title = '<script>alert("x")</script>'

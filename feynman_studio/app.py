@@ -10,7 +10,7 @@ from typing import Callable, List, Optional, Tuple
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-from .geometry import distance_to_polyline, geometry
+from .geometry import distance_to_polyline, edge_label_position, geometry
 from .latex import FORMATS, latex_source, standalone_source
 from .model import (
     GRID_SIZE,
@@ -513,19 +513,27 @@ class StudioApp:
         return best[1]
 
     def _label_hit(self, x: float, y: float) -> Tuple[Optional[str], Optional[str]]:
-        if self.selected:
-            vertex = self.document.vertex(self.selected)
-            if vertex and vertex.label and math.hypot(vertex.x + vertex.labelX - x, vertex.y + vertex.labelY - y) < 18:
-                return "vertex_label", vertex.id
-            edge = self.document.edge(self.selected)
-            if edge and edge.label:
+        font = self.document.style.fontPt * WIDTH / (self.document.style.widthMm * 72 / 25.4)
+        hits = []
+        for vertex in self.document.vertices:
+            if vertex.label:
+                hits.append(("vertex_label", vertex.id, vertex.label, vertex.x + vertex.labelX, vertex.y + vertex.labelY))
+        for edge in self.document.edges:
+            if edge.label:
                 start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
                 if start and end:
                     _, middle = geometry(start, end, edge)
-                    lx, ly = middle.x + middle.nx * edge.labelOffset, middle.y + middle.ny * edge.labelOffset
-                    if math.hypot(lx - x, ly - y) < 18:
-                        return "edge_label", edge.id
-        return None, None
+                    lx, ly = edge_label_position(middle, edge)
+                    hits.append(("edge_label", edge.id, edge.label, lx, ly))
+        nearest = (float("inf"), None, None)
+        for kind, object_id, label, lx, ly in hits:
+            half_width = max(18, font * len(display_label(label)) * 0.32)
+            half_height = max(12, font * 0.7)
+            if abs(x - lx) <= half_width and abs(y - ly) <= half_height:
+                distance = math.hypot(x - lx, y - ly)
+                if distance < nearest[0]:
+                    nearest = (distance, kind, object_id)
+        return nearest[1], nearest[2]
 
     def _canvas_down(self, event) -> None:
         x, y = self._document_point(event)
@@ -553,6 +561,7 @@ class StudioApp:
             return
         label_kind, label_id = self._label_hit(x, y)
         if label_kind:
+            self.selected = label_id
             self.drag_kind, self.drag_id = label_kind, label_id
         elif vertex:
             self.selected = vertex.id
@@ -591,10 +600,8 @@ class StudioApp:
         elif self.drag_kind == "edge_label":
             edge = self.document.edge(self.drag_id)
             if edge:
-                start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
-                if start and end:
-                    _, middle = geometry(start, end, edge)
-                    edge.labelOffset = max(-120, min(120, edge.labelOffset + dx * middle.nx + dy * middle.ny))
+                edge.labelX = max(-150, min(150, edge.labelX + dx))
+                edge.labelY = max(-150, min(150, edge.labelY + dy))
         self.drag_origin = (x, y)
         self.drag_changed = True
         self.redraw()
@@ -734,6 +741,8 @@ class StudioApp:
             elif not edge.circular:
                 self._entry("Curvature", _clean_number(edge.curvature), self._number_callback(lambda value: self.commit(lambda document: setattr(document.edge(edge.id), "curvature", value)), -220, 220))
             self._entry("Label offset", _clean_number(edge.labelOffset), self._number_callback(lambda value: self.commit(lambda document: setattr(document.edge(edge.id), "labelOffset", value)), -120, 120))
+            for label, attribute in (("Label X", "labelX"), ("Label Y", "labelY")):
+                self._entry(label, _clean_number(getattr(edge, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.edge(edge.id), attr, value)), -150, 150))
             ttk.Button(self.inspector, text="Line color…", command=lambda: self._choose_edge_color(edge.id)).pack(fill="x", pady=(6, 0))
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
         else:
