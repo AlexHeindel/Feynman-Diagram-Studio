@@ -26,7 +26,7 @@ Packaged builds include Python and the application dependencies, so no separate 
 
 #### macOS
 
-1. Unzip the macOS download.
+1. Download and unzip the macOS build for your Mac's processor (`arm64` for Apple silicon or `x64` for Intel).
 2. Drag `FeynmanDiagramStudio.app` into `Applications`.
 3. Open **FeynmanDiagramStudio** from Applications.
 
@@ -42,7 +42,7 @@ Windows SmartScreen may warn about an unsigned development build. Only choose **
 
 #### Linux
 
-1. Extract the Linux download.
+1. Extract the Linux `.tar.gz` download.
 2. Open a terminal in the extracted folder and make the app executable:
 
    ```bash
@@ -147,12 +147,17 @@ Pillow handles PNG/JPEG encoding and ReportLab writes vector PDF pages. The edit
 
 ## Build distributable apps
 
+Install build dependencies with `python -m pip install -e '.[dev]'`, then run PyInstaller on the operating system you are packaging for:
+
 ```bash
-python -m pip install -e '.[dev]'
-pyinstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+# macOS
+python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+
+# Windows or Linux
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py
 ```
 
-The GitHub Actions workflow builds ready-to-run artifacts for all three operating systems. Release builds should be code-signed (and notarized on macOS) before public distribution so users do not see platform security warnings.
+The GitHub Actions workflow builds and checks Apple silicon macOS, Intel macOS, Windows x64, and Linux x64 packages. Pushing a `v*` tag publishes them to GitHub Releases. These builds are unsigned; macOS Gatekeeper and Windows SmartScreen may show security warnings.
 
 ## Tests
 
