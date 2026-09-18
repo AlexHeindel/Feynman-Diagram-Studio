@@ -258,8 +258,8 @@ class StudioApp:
         self.undo_button.grid(row=0, column=0, sticky="ew", padx=(0, 2))
         self.redo_button = ttk.Button(self.history_controls, text="↷ Redo", command=self.redo)
         self.redo_button.grid(row=0, column=1, sticky="ew", padx=(2, 0))
-        ttk.Label(self.library, text="STARTING POINTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
         ttk.Button(self.library, text="＋ New blank diagram", command=self.new_document).pack(fill="x", pady=(0, 8))
+        ttk.Label(self.library, text="STARTING POINTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
         self.template_list = tk.Listbox(self.library, exportselection=False, height=12, activestyle="dotbox")
         for document in templates():
             self.template_list.insert("end", document.title)
@@ -851,9 +851,15 @@ class StudioApp:
         for child in self.inspector.winfo_children():
             child.destroy()
         ttk.Label(self.inspector, text="Inspector", style="Heading.TLabel").pack(anchor="w")
+        self._section("Figure style")
+        self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
+        self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))
+        self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
+        ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
+        ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
         if self.tool in ("connect", "loop"):
             self._section("New " + ("propagator" if self.tool == "connect" else "loop"))
-            self._choice("Line type", self.new_kind, [kind.title() for kind in KINDS], lambda value: setattr(self, "new_kind", value.lower()))
+            self._choice("Line type", self.new_kind.title(), [kind.title() for kind in KINDS], lambda value: setattr(self, "new_kind", value.lower()))
             if self.tool == "loop":
                 self._choice("Loop type", "Single vertex" if self.loop_mode == "single" else "Two vertices", ("Single vertex", "Two vertices"), self._set_loop_mode)
         vertex = self.document.vertex(self.selected or "")
@@ -891,12 +897,6 @@ class StudioApp:
                 self._entry(label, _clean_number(getattr(edge, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.edge(edge.id), attr, value)), -150, 150))
             ttk.Button(self.inspector, text="Line color…", command=lambda: self._choose_edge_color(edge.id)).pack(fill="x", pady=(6, 0))
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
-        self._section("Figure style")
-        self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
-        self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))
-        self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
-        ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
-        ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
         self._rebuild_object_list()
 
     def _set_loop_mode(self, value: str) -> None:

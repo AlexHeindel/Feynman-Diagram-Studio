@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from feynman_studio.app import StudioApp, check_tk_version
-from feynman_studio.model import blank_diagram, make_edge, make_vertex
+from feynman_studio.model import KINDS, blank_diagram, make_edge, make_vertex
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -64,6 +64,11 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIs(app.undo_button.master, app.history_controls)
             self.assertIs(app.redo_button.master, app.history_controls)
             self.assertEqual(app.undo_button.winfo_width(), app.redo_button.winfo_width())
+            new_button = next(widget for widget in app.library.pack_slaves()
+                              if isinstance(widget, ttk.Button) and widget.cget("text") == "＋ New blank diagram")
+            starting_points = next(widget for widget in app.library.pack_slaves()
+                                   if isinstance(widget, ttk.Label) and widget.cget("text") == "STARTING POINTS")
+            self.assertLess(new_button.winfo_y(), starting_points.winfo_y())
             root.geometry("960x640")
             root.update()
             self.assertEqual(app.undo_button.winfo_width(), app.redo_button.winfo_width())
@@ -75,6 +80,12 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(app.template_list.size(), 10)
             self.assertIsNotNone(app.canvas_preview)
             self.assertGreaterEqual(len(app.canvas.find_all()), len(app.document.vertices) + 2)
+            for object_id in (app.document.vertices[0].id, app.document.edges[0].id):
+                app.selected = object_id
+                app._rebuild_inspector()
+                labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
+                self.assertEqual(labels[:2], ["Inspector", "Figure style"])
+            app.selected = None
             app.set_tool("connect")
             self.assertEqual(app.tool, "connect")
             app.theme_mode.set("light")
@@ -101,6 +112,19 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertFalse(app.document.vertices)
             inspector_labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
             self.assertNotIn("Diagram name", inspector_labels)
+            for tool in ("select", "vertex", "connect", "loop"):
+                app.set_tool(tool)
+                labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
+                self.assertEqual(labels[:2], ["Inspector", "Figure style"])
+                if tool in ("connect", "loop"):
+                    for kind in KINDS:
+                        app.new_kind = kind
+                        app._rebuild_inspector()
+                        children = app.inspector.winfo_children()
+                        line_type_index = next(index for index, widget in enumerate(children)
+                                               if isinstance(widget, ttk.Label) and widget.cget("text") == "Line type")
+                        self.assertIsInstance(children[line_type_index + 1], ttk.Combobox)
+                        self.assertEqual(children[line_type_index + 1].get(), kind.title())
 
             self.assertTrue(app.title_label.bind("<Double-Button-1>"))
             app.rename_diagram()
