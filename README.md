@@ -160,10 +160,13 @@ Install build dependencies with `python -m pip install -e '.[dev]'`, then run Py
 
 ```bash
 # macOS
-python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio --collect-data feynman_studio --icon feynman_studio/assets/app-icon.png run_feynman_studio.py
 
-# Windows or Linux
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+# Windows
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio --collect-data feynman_studio --icon feynman_studio/assets/app-icon.png run_feynman_studio.py
+
+# Linux
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio --collect-data feynman_studio run_feynman_studio.py
 ```
 
 The GitHub Actions workflow builds and checks Apple silicon macOS, Intel macOS, Windows x64, and Linux x64 packages. Pushing a `v*` tag publishes them to GitHub Releases. These builds are unsigned; macOS Gatekeeper and Windows SmartScreen may show security warnings.

@@ -49,7 +49,7 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - name: Build macOS app
         if: runner.os == 'macOS'
-        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+        run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio --collect-data feynman_studio --icon feynman_studio/assets/app-icon.png run_feynman_studio.py
       - name: Stamp macOS app version
         if: runner.os == 'macOS'
         run: |
@@ -67,9 +67,12 @@ jobs:
               plistlib.dump(info, stream)
           PY
           codesign --force --deep --sign - dist/FeynmanDiagramStudio.app
-      - name: Build Windows or Linux executable
-        if: runner.os != 'macOS'
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio --collect-data feynman_studio --icon feynman_studio/assets/app-icon.png run_feynman_studio.py
+      - name: Build Linux executable
+        if: runner.os == 'Linux'
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio --collect-data feynman_studio run_feynman_studio.py
       - name: Check macOS app starts
         if: runner.os == 'macOS'
         run: dist/FeynmanDiagramStudio.app/Contents/MacOS/FeynmanDiagramStudio --smoke-test

@@ -42,6 +42,7 @@ class GuiSmokeTests(unittest.TestCase):
             app = StudioApp(root)
             root.update_idletasks()
             root.update()
+            self.assertEqual((app.app_icon.width(), app.app_icon.height()), (1024, 1024))
             self.assertGreater(root.winfo_width(), 900)
             self.assertGreater(app.canvas.winfo_width(), 300)
             self.assertEqual(len(app.tool_buttons), 4)

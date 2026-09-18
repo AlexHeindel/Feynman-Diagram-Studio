@@ -80,6 +80,8 @@ class StudioApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(APP_NAME)
+        self.app_icon = tk.PhotoImage(file=str(Path(__file__).resolve().parent / "assets" / "app-icon.png"))
+        self.root.iconphoto(True, self.app_icon)
         self.root.geometry("1280x800")
         self.root.minsize(960, 640)
         self.document = templates()[0]
