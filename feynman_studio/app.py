@@ -215,19 +215,6 @@ class StudioApp:
             menu.add_command(label="About", command=lambda: messagebox.showinfo("About", APP_NAME + "\nVersion " + __version__ + "\nOpen source under the MIT License"))
 
     def _build_ui(self) -> None:
-        self.menu_bar = ttk.Frame(self.root, padding=(8, 2))
-        self.menu_bar.pack(fill="x")
-        self.menu_buttons = {}
-        self.visible_menus = {}
-        for name in ("File", "Edit", "View", "Tools", "Help"):
-            button = ttk.Button(self.menu_bar, text=name, style="Menu.TButton")
-            submenu = tk.Menu(button, tearoff=False)
-            self._fill_menu(name, submenu)
-            button.configure(command=lambda menu=submenu, widget=button: menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height()))
-            button.pack(side="left")
-            self.menu_buttons[name] = button
-            self.visible_menus[name] = submenu
-        ttk.Separator(self.root).pack(fill="x")
         toolbar = ttk.Frame(self.root, padding=(8, 6))
         toolbar.pack(fill="x")
         self.file_controls = ttk.Frame(toolbar)
@@ -241,6 +228,19 @@ class StudioApp:
         self.latex_button.grid(row=0, column=2, sticky="ew", padx=2)
         self.export_button.grid(row=0, column=3, sticky="ew", padx=2)
         self.file_controls.columnconfigure((0, 1, 2, 3), weight=1)
+
+        self.menu_bar = ttk.Frame(toolbar)
+        self.menu_bar.pack(side="left")
+        self.menu_buttons = {}
+        self.visible_menus = {}
+        for name in ("File", "Edit", "View", "Tools", "Help"):
+            button = ttk.Button(self.menu_bar, text=name, style="Menu.TButton")
+            submenu = tk.Menu(button, tearoff=False)
+            self._fill_menu(name, submenu)
+            button.configure(command=lambda menu=submenu, widget=button: menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height()))
+            button.pack(side="left")
+            self.menu_buttons[name] = button
+            self.visible_menus[name] = submenu
 
         body = ttk.Panedwindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True)
