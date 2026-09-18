@@ -16,6 +16,7 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 - Rename a diagram by double-clicking its title above the canvas or choosing Edit → Rename Diagram
 - Editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
+- LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
 
 ### Feynman diagram features
 
@@ -23,10 +24,8 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 - Straight, curved, self-loop, and two-vertex circular paths
 - Forward and reverse arrows
 - Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
-- Click labels to select vertices or propagators; drag labels freely in both directions
 - Edit propagator colors and vertex or propagator labels, with independent label positioning
 - Ten starting templates
-- LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
 
 ## Install and run
 
