@@ -1,23 +1,31 @@
 # Feynman Diagram Studio
 
-A lightweight, native desktop editor for drawing publication-ready Feynman diagrams. It uses operating-system GUI controls and a native canvas.
+A lightweight, native desktop editor for drawing publication-ready Feynman diagrams, including LaTeX and SVG/PDF/PNG/JPEG export.
 
 ![Feynman Diagram Studio editing a kaon decay diagram](docs/images/feynman-diagram-studio.png)
 
 ## Features
 
+### General features
+
 - Native GUI for macOS, Windows, and Linux
 - Visible File, Edit, View, Tools, and Help menus; automatic system theme with Light and Dark overrides
-- Fermion, photon, gluon, scalar, and ghost propagators
-- Straight, curved, self-loop, and two-vertex circular paths
-- Forward/reverse arrows and one-, two-, or three-line quark bundles
-- Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
 - Antialiased, high-resolution canvas preview
-- Click labels to select vertices or propagators; drag labels freely in both directions; 10-, 20-, or 40-unit page grid and vertex snapping; keyboard nudging
+- 10-, 20-, or 40-unit page grid, vertex snapping, and keyboard nudging
 - Undo/redo history and local crash-recovery autosave
 - Rename a diagram by double-clicking its title above the canvas or choosing Edit → Rename Diagram
-- Ten starting templates and editable JSON project files
+- Editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
+
+### Feynman diagram features
+
+- Fermion, photon, gluon, scalar, and ghost propagators
+- Straight, curved, self-loop, and two-vertex circular paths
+- Forward and reverse arrows
+- Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
+- Click labels to select vertices or propagators; drag labels freely in both directions
+- Edit propagator colors and vertex or propagator labels, with independent label positioning
+- Ten starting templates
 - LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
 
 ## Install and run
