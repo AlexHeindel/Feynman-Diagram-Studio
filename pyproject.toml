@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "feynman-diagram-studio"
-version = "0.1.0"
+version = "0.1.3"
 description = "A lightweight native editor for publication-ready Feynman diagrams"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Feynman Diagram Studio contributors" }]
-dependencies = ["Pillow>=10.0,<13", "reportlab>=4.2,<5"]
+dependencies = ["Pillow>=10.0,<13", "reportlab>=4.2,<6"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",

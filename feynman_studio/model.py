@@ -259,8 +259,8 @@ def bundle_offsets(edge: Edge) -> Iterable[float]:
     return tuple((index - (count - 1) / 2) * edge.bundleSpacing for index in range(count))
 
 
-def snap_value(value: float) -> float:
-    return math.floor(value / GRID_SIZE + 0.5) * GRID_SIZE
+def snap_value(value: float, grid_size: float = GRID_SIZE) -> float:
+    return math.floor(value / grid_size + 0.5) * grid_size
 
 
 def blank_diagram() -> Diagram:

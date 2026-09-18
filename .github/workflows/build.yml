@@ -50,6 +50,23 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS'
         run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name FeynmanDiagramStudio run_feynman_studio.py
+      - name: Stamp macOS app version
+        if: runner.os == 'macOS'
+        run: |
+          python - <<'PY'
+          import plistlib
+          from pathlib import Path
+          from feynman_studio import __version__
+
+          path = Path("dist/FeynmanDiagramStudio.app/Contents/Info.plist")
+          with path.open("rb") as stream:
+              info = plistlib.load(stream)
+          info["CFBundleShortVersionString"] = __version__
+          info["CFBundleVersion"] = __version__
+          with path.open("wb") as stream:
+              plistlib.dump(info, stream)
+          PY
+          codesign --force --deep --sign - dist/FeynmanDiagramStudio.app
       - name: Build Windows or Linux executable
         if: runner.os != 'macOS'
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name FeynmanDiagramStudio run_feynman_studio.py

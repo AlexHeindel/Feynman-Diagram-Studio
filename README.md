@@ -7,13 +7,15 @@ A lightweight, native desktop editor for drawing publication-ready Feynman diagr
 ## Features
 
 - Native GUI for macOS, Windows, and Linux
+- Visible File, Edit, View, Tools, and Help menus; automatic system theme with Light and Dark overrides
 - Fermion, photon, gluon, scalar, and ghost propagators
 - Straight, curved, self-loop, and two-vertex circular paths
 - Forward/reverse arrows and one-, two-, or three-line quark bundles
 - Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
 - Antialiased, high-resolution canvas preview
-- Click labels to select vertices or propagators; drag labels freely in both directions; consistent 20-unit grid snapping for vertices; keyboard nudging
+- Click labels to select vertices or propagators; drag labels freely in both directions; 10-, 20-, or 40-unit page grid and vertex snapping; keyboard nudging
 - Undo/redo history and local crash-recovery autosave
+- Rename a diagram by double-clicking its title above the canvas or choosing Edit → Rename Diagram
 - Ten starting templates and editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
 - LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2

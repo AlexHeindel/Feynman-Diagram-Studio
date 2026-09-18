@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
@@ -10,6 +12,7 @@ from typing import Callable, List, Optional, Tuple
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
+from . import __version__
 from .geometry import distance_to_polyline, edge_label_position, geometry
 from .latex import FORMATS, latex_source, standalone_source
 from .model import (
@@ -32,6 +35,30 @@ from .render import display_label, render_preview, save_pdf, save_raster, save_s
 
 APP_NAME = "Feynman Diagram Studio"
 MINIMUM_TK = 8.6
+
+
+def _system_theme() -> str:
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True, check=False, timeout=1)
+            return "dark" if result.stdout.strip().lower() == "dark" else "light"
+        except (OSError, subprocess.TimeoutExpired):
+            return "light"
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+                return "light" if winreg.QueryValueEx(key, "AppsUseLightTheme")[0] else "dark"
+        except OSError:
+            return "light"
+    if "dark" in os.environ.get("GTK_THEME", "").lower():
+        return "dark"
+    try:
+        result = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"], capture_output=True, text=True, check=False, timeout=1)
+        return "dark" if "prefer-dark" in result.stdout else "light"
+    except (OSError, subprocess.TimeoutExpired):
+        return "light"
 
 
 def check_tk_version(version: float = tk.TkVersion) -> None:
@@ -65,6 +92,9 @@ class StudioApp:
         self.loop_mode = "single"
         self.snap = tk.BooleanVar(value=True)
         self.show_grid = tk.BooleanVar(value=False)
+        self.grid_size = tk.IntVar(value=int(GRID_SIZE))
+        self.theme_mode = tk.StringVar(value="automatic")
+        self.active_theme: Optional[str] = None
         self.status = tk.StringVar(value="Local workspace")
         self.canvas_scale = 1.0
         self.canvas_offset = (0.0, 0.0)
@@ -77,6 +107,7 @@ class StudioApp:
         self.current_path: Optional[Path] = None
         self.autosave_job: Optional[str] = None
         self.canvas_preview = None
+        self.title_entry: Optional[ttk.Entry] = None
 
         self._configure_style()
         self._build_menu()
@@ -84,54 +115,121 @@ class StudioApp:
         self._bind_keys()
         self._restore_autosave()
         self.redraw()
+        self.root.after(5000, self._follow_system_theme)
 
     def _configure_style(self) -> None:
-        style = ttk.Style()
-        if sys.platform == "darwin":
-            style.theme_use("aqua")
-        elif "vista" in style.theme_names():
-            style.theme_use("vista")
-        style.configure("Tool.TButton", padding=(9, 6))
-        style.configure("Selected.Tool.TButton", padding=(9, 6), relief="sunken")
-        style.configure("Heading.TLabel", font=("TkDefaultFont", 13, "bold"))
-        style.configure("Eyebrow.TLabel", foreground="#64748b", font=("TkDefaultFont", 9, "bold"))
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+        self._apply_theme()
+
+    def _apply_theme(self, force: bool = False) -> None:
+        theme = _system_theme() if self.theme_mode.get() == "automatic" else self.theme_mode.get()
+        if theme == self.active_theme and not force:
+            return
+        self.active_theme = theme
+        colors = {
+            "light": ("#f3f5f8", "#ffffff", "#e7edf4", "#1f2937", "#64748b", "#e4e9f0", "#bdc7d1", "#2563eb"),
+            "dark": ("#22262e", "#2b303a", "#343c49", "#ecf1f7", "#a8b4c5", "#3a4351", "#566273", "#3b82f6"),
+        }
+        background, field, canvas, foreground, muted, button, border, accent = colors[theme]
+        self.root.tk_setPalette(background=background, foreground=foreground, activeBackground=button,
+                                activeForeground=foreground, selectBackground=accent, selectForeground="#ffffff")
+        self.root.configure(background=background)
+        style = self.style
+        style.configure(".", background=background, foreground=foreground, fieldbackground=field)
+        style.configure("TFrame", background=background)
+        style.configure("TLabel", background=background, foreground=foreground)
+        style.configure("Heading.TLabel", background=background, foreground=foreground, font=("TkDefaultFont", 13, "bold"))
+        style.configure("Eyebrow.TLabel", background=background, foreground=muted, font=("TkDefaultFont", 9, "bold"))
+        style.configure("Muted.TLabel", background=background, foreground=muted)
+        style.configure("TButton", background=button, foreground=foreground, bordercolor=border, padding=(9, 6))
+        style.map("TButton", background=[("active", border)], foreground=[("disabled", muted)])
+        style.configure("Tool.TButton", background=button, foreground=foreground, bordercolor=border, padding=(9, 6))
+        style.map("Tool.TButton", background=[("active", border)])
+        style.configure("Selected.Tool.TButton", background=accent, foreground="#ffffff", bordercolor=accent, padding=(9, 6))
+        style.map("Selected.Tool.TButton", background=[("active", accent)])
+        style.configure("Menu.TButton", background=background, foreground=foreground, bordercolor=background, padding=(10, 5))
+        style.map("Menu.TButton", background=[("active", button)])
+        style.configure("TEntry", fieldbackground=field, foreground=foreground, insertcolor=foreground, bordercolor=border)
+        style.configure("TCombobox", fieldbackground=field, foreground=foreground, bordercolor=border)
+        style.map("TCombobox", fieldbackground=[("readonly", field)], foreground=[("readonly", foreground)])
+        style.configure("TCheckbutton", background=background, foreground=foreground)
+        style.map("TCheckbutton", background=[("active", background)], foreground=[("active", foreground)])
+        style.configure("TRadiobutton", background=background, foreground=foreground)
+        style.configure("TScrollbar", background=button, troughcolor=background, bordercolor=border)
+        style.configure("TSeparator", background=border)
+        if hasattr(self, "template_list"):
+            for widget in (self.template_list, self.object_list):
+                widget.configure(background=field, foreground=foreground, selectbackground=accent,
+                                 selectforeground="#ffffff", highlightbackground=border)
+            self.canvas.configure(background=canvas)
+            self.inspector_canvas.configure(background=background)
+
+    def _follow_system_theme(self) -> None:
+        if self.theme_mode.get() == "automatic":
+            self._apply_theme()
+        self.root.after(5000, self._follow_system_theme)
 
     def _build_menu(self) -> None:
-        menu = tk.Menu(self.root)
-        file_menu = tk.Menu(menu, tearoff=False)
-        file_menu.add_command(label="New", accelerator="Ctrl+N", command=self.new_document)
-        file_menu.add_command(label="Open…", accelerator="Ctrl+O", command=self.open_document)
-        file_menu.add_command(label="Save", accelerator="Ctrl+S", command=self.save_document)
-        file_menu.add_command(label="Save As…", accelerator="Ctrl+Shift+S", command=lambda: self.save_document(True))
-        file_menu.add_separator()
-        file_menu.add_command(label="Export…", accelerator="Ctrl+E", command=self.show_export_dialog)
-        file_menu.add_command(label="LaTeX Source…", command=self.show_latex_dialog)
-        file_menu.add_separator()
-        file_menu.add_command(label="Quit", command=self.root.destroy)
-        menu.add_cascade(label="File", menu=file_menu)
+        self.native_menu = tk.Menu(self.root)
+        for name in ("File", "Edit", "View", "Tools", "Help"):
+            submenu = tk.Menu(self.native_menu, tearoff=False)
+            self._fill_menu(name, submenu)
+            self.native_menu.add_cascade(label=name, menu=submenu)
+        self.root.configure(menu=self.native_menu)
 
-        edit_menu = tk.Menu(menu, tearoff=False)
-        edit_menu.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo)
-        edit_menu.add_command(label="Redo", accelerator="Ctrl+Shift+Z", command=self.redo)
-        edit_menu.add_separator()
-        edit_menu.add_command(label="Delete Selection", accelerator="Delete", command=self.remove_selected)
-        menu.add_cascade(label="Edit", menu=edit_menu)
-
-        view_menu = tk.Menu(menu, tearoff=False)
-        view_menu.add_checkbutton(label="Snap to Grid", variable=self.snap, command=self._snap_setting_changed)
-        view_menu.add_checkbutton(label="Show Page Grid", variable=self.show_grid, command=self.redraw)
-        menu.add_cascade(label="View", menu=view_menu)
-
-        help_menu = tk.Menu(menu, tearoff=False)
-        help_menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
-        help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", APP_NAME + "\nVersion 0.1\nOpen source under the MIT License"))
-        menu.add_cascade(label="Help", menu=help_menu)
-        self.root.configure(menu=menu)
+    def _fill_menu(self, name: str, menu: tk.Menu) -> None:
+        shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
+        if name == "File":
+            menu.add_command(label="New Blank Diagram", accelerator=shortcut + "+N", command=self.new_document)
+            menu.add_command(label="Open…", accelerator=shortcut + "+O", command=self.open_document)
+            menu.add_command(label="Save", accelerator=shortcut + "+S", command=self.save_document)
+            menu.add_command(label="Save As…", accelerator=shortcut + "+Shift+S", command=lambda: self.save_document(True))
+            menu.add_separator()
+            menu.add_command(label="Export…", accelerator=shortcut + "+E", command=self.show_export_dialog)
+            menu.add_command(label="LaTeX Source…", command=self.show_latex_dialog)
+            menu.add_separator()
+            menu.add_command(label="Quit", command=self.root.destroy)
+        elif name == "Edit":
+            menu.add_command(label="Undo", accelerator=shortcut + "+Z", command=self.undo)
+            menu.add_command(label="Redo", accelerator=shortcut + "+Shift+Z", command=self.redo)
+            menu.add_separator()
+            menu.add_command(label="Rename Diagram…", command=self.rename_diagram)
+            menu.add_command(label="Delete Selection", accelerator="Delete", command=self.remove_selected)
+        elif name == "View":
+            menu.add_checkbutton(label="Snap to Grid", variable=self.snap, command=self._snap_setting_changed)
+            menu.add_checkbutton(label="Show Page Grid", variable=self.show_grid, command=self.redraw)
+            spacing_menu = tk.Menu(menu, tearoff=False)
+            for label, spacing in (("Fine · 10 units", 10), ("Standard · 20 units", 20), ("Coarse · 40 units", 40)):
+                spacing_menu.add_radiobutton(label=label, variable=self.grid_size, value=spacing, command=self._grid_spacing_changed)
+            menu.add_cascade(label="Grid Spacing", menu=spacing_menu)
+            theme_menu = tk.Menu(menu, tearoff=False)
+            for label, value in (("Automatic", "automatic"), ("Light", "light"), ("Dark", "dark")):
+                theme_menu.add_radiobutton(label=label, variable=self.theme_mode, value=value, command=self._apply_theme)
+            menu.add_cascade(label="Theme", menu=theme_menu)
+        elif name == "Tools":
+            for label, tool in (("Select", "select"), ("Add Vertex", "vertex"), ("Connect Vertices", "connect"), ("Add Loop", "loop")):
+                menu.add_command(label=label, command=lambda value=tool: self.set_tool(value))
+        else:
+            menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
+            menu.add_command(label="About", command=lambda: messagebox.showinfo("About", APP_NAME + "\nVersion " + __version__ + "\nOpen source under the MIT License"))
 
     def _build_ui(self) -> None:
+        self.menu_bar = ttk.Frame(self.root, padding=(8, 2))
+        self.menu_bar.pack(fill="x")
+        self.menu_buttons = {}
+        self.visible_menus = {}
+        for name in ("File", "Edit", "View", "Tools", "Help"):
+            button = ttk.Button(self.menu_bar, text=name, style="Menu.TButton")
+            submenu = tk.Menu(button, tearoff=False)
+            self._fill_menu(name, submenu)
+            button.configure(command=lambda menu=submenu, widget=button: menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height()))
+            button.pack(side="left")
+            self.menu_buttons[name] = button
+            self.visible_menus[name] = submenu
+        ttk.Separator(self.root).pack(fill="x")
         toolbar = ttk.Frame(self.root, padding=(8, 6))
         toolbar.pack(fill="x")
-        ttk.Label(toolbar, text="⚛  " + APP_NAME, style="Heading.TLabel").pack(side="left", padx=(2, 18))
         self.file_controls = ttk.Frame(toolbar)
         self.file_controls.pack(side="right")
         self.open_button = ttk.Button(self.file_controls, text="Open", command=self.open_document)
@@ -155,10 +253,11 @@ class StudioApp:
 
         self.history_controls = ttk.Frame(self.library)
         self.history_controls.pack(fill="x", pady=(0, 10))
+        self.history_controls.columnconfigure((0, 1), weight=1, uniform="history")
         self.undo_button = ttk.Button(self.history_controls, text="↶ Undo", command=self.undo)
-        self.undo_button.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.undo_button.grid(row=0, column=0, sticky="ew", padx=(0, 2))
         self.redo_button = ttk.Button(self.history_controls, text="↷ Redo", command=self.redo)
-        self.redo_button.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        self.redo_button.grid(row=0, column=1, sticky="ew", padx=(2, 0))
         ttk.Label(self.library, text="STARTING POINTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
         ttk.Button(self.library, text="＋ New blank diagram", command=self.new_document).pack(fill="x", pady=(0, 8))
         self.template_list = tk.Listbox(self.library, exportselection=False, height=12, activestyle="dotbox")
@@ -171,21 +270,22 @@ class StudioApp:
         self.object_list = tk.Listbox(self.library, exportselection=False, activestyle="dotbox")
         self.object_list.pack(fill="both", expand=True)
         self.object_list.bind("<<ListboxSelect>>", self._select_object)
-        ttk.Label(self.library, text="Version 0.1 · Native prototype", foreground="#64748b").pack(anchor="w", pady=(8, 0))
+        ttk.Label(self.library, text="Version " + __version__ + " · Native prototype", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         heading = ttk.Frame(center)
         heading.pack(fill="x", pady=(0, 6))
         title_block = ttk.Frame(heading)
-        title_block.pack(side="left")
+        title_block.pack(fill="x")
         ttk.Label(title_block, text="FEYNMAN DIAGRAM", style="Eyebrow.TLabel").pack(anchor="w")
-        self.title_label = ttk.Label(title_block, text=self.document.title, style="Heading.TLabel")
+        self.title_label = ttk.Label(title_block, text=self.document.title, style="Heading.TLabel", cursor="hand2")
         self.title_label.pack(anchor="w")
-        self.diagram_tools = ttk.Frame(heading)
-        self.diagram_tools.pack(side="right", padx=(12, 0))
+        self.title_label.bind("<Double-Button-1>", lambda _event: self.rename_diagram())
+        self.diagram_tools = ttk.Frame(center)
+        self.diagram_tools.pack(fill="x", pady=(0, 6))
         self.tool_buttons = {}
         for key, label in (("select", "Select"), ("vertex", "Vertex"), ("connect", "Connect"), ("loop", "Loop")):
             button = ttk.Button(self.diagram_tools, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
-            button.pack(side="left", padx=2)
+            button.pack(side="left", fill="x", expand=True, padx=2)
             self.tool_buttons[key] = button
         self.canvas = tk.Canvas(center, background="#dfe5eb", highlightthickness=0, cursor="arrow")
         self.canvas.pack(fill="both", expand=True)
@@ -193,7 +293,7 @@ class StudioApp:
         self.canvas.bind("<Button-1>", self._canvas_down)
         self.canvas.bind("<B1-Motion>", self._canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._canvas_up)
-        self.hint = ttk.Label(center, text="", foreground="#64748b")
+        self.hint = ttk.Label(center, text="", style="Muted.TLabel")
         self.hint.pack(fill="x", pady=(6, 0))
 
         self.inspector_canvas = tk.Canvas(inspector_host, highlightthickness=0, width=280)
@@ -213,6 +313,7 @@ class StudioApp:
         ttk.Label(status_bar, textvariable=self.status).pack(side="right")
         self._update_tool_buttons()
         self._rebuild_inspector()
+        self._apply_theme(force=True)
 
     def _sync_inspector_scroll(self, _event=None) -> None:
         bounds = self.inspector_canvas.bbox("all")
@@ -257,19 +358,19 @@ class StudioApp:
             vertex = self.document.vertex(self.selected or "")
             if vertex:
                 before = self.document.clone()
-                distance = (GRID_SIZE * (2 if event.state & 1 else 1)) if self.snap.get() else (10 if event.state & 1 else 1)
+                distance = (self.grid_size.get() * (2 if event.state & 1 else 1)) if self.snap.get() else (10 if event.state & 1 else 1)
                 if key == "left":
                     value = vertex.x - distance
-                    vertex.x = max(20, snap_value(value) if self.snap.get() else value)
+                    vertex.x = self._snap_coordinate(value, 20, 700) if self.snap.get() else max(20, value)
                 elif key == "right":
                     value = vertex.x + distance
-                    vertex.x = min(700, snap_value(value) if self.snap.get() else value)
+                    vertex.x = self._snap_coordinate(value, 20, 700) if self.snap.get() else min(700, value)
                 elif key == "up":
                     value = vertex.y - distance
-                    vertex.y = max(20, snap_value(value) if self.snap.get() else value)
+                    vertex.y = self._snap_coordinate(value, 20, 460) if self.snap.get() else max(20, value)
                 else:
                     value = vertex.y + distance
-                    vertex.y = min(460, snap_value(value) if self.snap.get() else value)
+                    vertex.y = self._snap_coordinate(value, 20, 460) if self.snap.get() else min(460, value)
                 self._record(before)
 
     def _key_delete(self, _event) -> None:
@@ -314,9 +415,38 @@ class StudioApp:
         self._rebuild_inspector()
         self.redraw()
 
+    def rename_diagram(self) -> None:
+        if self.title_entry is not None:
+            self.title_entry.focus_set()
+            return
+        self.title_label.pack_forget()
+        entry = ttk.Entry(self.title_label.master)
+        self.title_entry = entry
+        entry.insert(0, self.document.title)
+        entry.pack(fill="x")
+        entry.bind("<Return>", lambda _event: self._finish_title_edit(True))
+        entry.bind("<Escape>", lambda _event: self._finish_title_edit(False))
+        entry.bind("<FocusOut>", lambda _event: self._finish_title_edit(True))
+        entry.focus_set()
+        entry.selection_range(0, "end")
+
+    def _finish_title_edit(self, save: bool) -> str:
+        entry = self.title_entry
+        if entry is None:
+            return "break"
+        title = entry.get().strip()[:100] or "Untitled diagram"
+        self.title_entry = None
+        entry.destroy()
+        self.title_label.pack(anchor="w")
+        if save:
+            self.commit(lambda document: setattr(document, "title", title), "Diagram renamed")
+        return "break"
+
     def undo(self) -> None:
         if not self.past:
             return
+        if getattr(self, "title_entry", None) is not None:
+            self._finish_title_edit(False)
         self.future.insert(0, self.document)
         self.document = self.past.pop()
         self.selected = None
@@ -327,6 +457,8 @@ class StudioApp:
     def redo(self) -> None:
         if not self.future:
             return
+        if getattr(self, "title_entry", None) is not None:
+            self._finish_title_edit(False)
         self.past.append(self.document)
         self.document = self.future.pop(0)
         self.selected = None
@@ -337,7 +469,11 @@ class StudioApp:
     def new_document(self) -> None:
         self._replace_document(blank_diagram(), "New diagram")
 
-    def _replace_document(self, document: Diagram, status: str) -> None:
+    def _replace_document(self, document: Diagram, status: str, from_template: bool = False) -> None:
+        if self.title_entry is not None:
+            self._finish_title_edit(False)
+        if not from_template:
+            self.template_list.selection_clear(0, "end")
         before = self.document.clone()
         self.document = document.clone()
         self.selected = None
@@ -348,7 +484,7 @@ class StudioApp:
     def _load_selected_template(self, _event) -> None:
         selection = self.template_list.curselection()
         if selection:
-            self._replace_document(templates()[selection[0]], "Template loaded")
+            self._replace_document(templates()[selection[0]], "Template loaded", True)
 
     def _select_object(self, _event=None) -> None:
         selection = self.object_list.curselection()
@@ -430,7 +566,7 @@ class StudioApp:
         ox, oy = offset
         from PIL import ImageTk
 
-        self.canvas_preview = ImageTk.PhotoImage(render_preview(self.document, page_width, page_height, self.show_grid.get()))
+        self.canvas_preview = ImageTk.PhotoImage(render_preview(self.document, page_width, page_height, self.show_grid.get(), grid_size=self.grid_size.get()))
         self.canvas.create_image(ox, oy, image=self.canvas_preview, anchor="nw", tags="paper")
         self.canvas.create_rectangle(ox, oy, ox + page_width, oy + page_height, fill="", outline="#b8c1cc", width=1, tags="paper")
         for vertex in self.document.vertices:
@@ -468,11 +604,19 @@ class StudioApp:
     def _inside_page(self, x: float, y: float) -> bool:
         return 0 <= x <= WIDTH and 0 <= y <= HEIGHT
 
-    @staticmethod
-    def _snap_document(document: Diagram) -> None:
+    def _snap_coordinate(self, value: float, minimum: int, maximum: int) -> float:
+        spacing = self.grid_size.get()
+        return max(math.ceil(minimum / spacing) * spacing,
+                   min(math.floor(maximum / spacing) * spacing, snap_value(value, spacing)))
+
+    def _snap_document(self, document: Diagram) -> None:
         for vertex in document.vertices:
-            vertex.x = max(20, min(700, snap_value(vertex.x)))
-            vertex.y = max(20, min(460, snap_value(vertex.y)))
+            vertex.x = self._snap_coordinate(vertex.x, 20, 700)
+            vertex.y = self._snap_coordinate(vertex.y, 20, 460)
+
+    def _grid_spacing_changed(self) -> None:
+        self.status.set("Grid spacing: {} units".format(self.grid_size.get()))
+        self.redraw()
 
     def _snap_setting_changed(self) -> None:
         if not self.snap.get():
@@ -490,7 +634,7 @@ class StudioApp:
         if vertex is None:
             return
         if self.snap.get():
-            value = snap_value(value)
+            value = self._snap_coordinate(value, 20, 700 if attribute == "x" else 460)
         minimum, maximum = (20, 700) if attribute == "x" else (20, 460)
         setattr(vertex, attribute, max(minimum, min(maximum, value)))
 
@@ -544,7 +688,8 @@ class StudioApp:
                 messagebox.showerror("Vertex limit", "A project may contain at most 150 vertices.")
                 return
             if self.snap.get():
-                x, y = snap_value(x), snap_value(y)
+                x = self._snap_coordinate(x, 20, 700)
+                y = self._snap_coordinate(y, 20, 460)
             item = make_vertex(max(20, min(700, x)), max(20, min(460, y)), visible=True)
             self.commit(lambda document: document.vertices.append(item), "Vertex added")
             self.selected = item.id
@@ -590,7 +735,8 @@ class StudioApp:
             if vertex:
                 nx, ny = x + self.drag_vertex_offset[0], y + self.drag_vertex_offset[1]
                 if self.snap.get():
-                    nx, ny = snap_value(nx), snap_value(ny)
+                    nx = self._snap_coordinate(nx, 20, 700)
+                    ny = self._snap_coordinate(ny, 20, 460)
                 vertex.x, vertex.y = max(20, min(700, nx)), max(20, min(460, ny))
         elif self.drag_kind == "vertex_label":
             vertex = self.document.vertex(self.drag_id)
@@ -745,10 +891,6 @@ class StudioApp:
                 self._entry(label, _clean_number(getattr(edge, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.edge(edge.id), attr, value)), -150, 150))
             ttk.Button(self.inspector, text="Line color…", command=lambda: self._choose_edge_color(edge.id)).pack(fill="x", pady=(6, 0))
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
-        else:
-            self._section("Document")
-            self._entry("Diagram name", self.document.title, lambda value: self.commit(lambda document: setattr(document, "title", value.strip()[:100] or "Untitled diagram")))
-
         self._section("Figure style")
         self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
         self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))

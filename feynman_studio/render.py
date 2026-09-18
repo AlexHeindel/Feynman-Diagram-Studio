@@ -335,6 +335,7 @@ def _render_at_size(
     height: int,
     transparent: bool = False,
     show_grid: bool = False,
+    grid_size: int = int(GRID_SIZE),
 ):
     from PIL import Image, ImageDraw
 
@@ -344,15 +345,15 @@ def _render_at_size(
     draw = ImageDraw.Draw(image)
     if show_grid:
         grid_width = max(1, round(scale))
-        for x in range(int(GRID_SIZE), int(WIDTH), int(GRID_SIZE)):
+        for x in range(grid_size, int(WIDTH), grid_size):
             draw.line(
-                (x * scale, GRID_SIZE * scale, x * scale, (HEIGHT - GRID_SIZE) * scale),
+                (x * scale, grid_size * scale, x * scale, (HEIGHT - grid_size) * scale),
                 fill="#e8edf2",
                 width=grid_width,
             )
-        for y in range(int(GRID_SIZE), int(HEIGHT), int(GRID_SIZE)):
+        for y in range(grid_size, int(HEIGHT), grid_size):
             draw.line(
-                (GRID_SIZE * scale, y * scale, (WIDTH - GRID_SIZE) * scale, y * scale),
+                (grid_size * scale, y * scale, (WIDTH - grid_size) * scale, y * scale),
                 fill="#e8edf2",
                 width=grid_width,
             )
@@ -384,13 +385,13 @@ def render_image(document: Diagram, ppi: int = 600, transparent: bool = False):
     return _render_at_size(document, width, height, transparent)
 
 
-def render_preview(document: Diagram, width: int, height: int, show_grid: bool = False, oversample: int = 3):
+def render_preview(document: Diagram, width: int, height: int, show_grid: bool = False, oversample: int = 3, grid_size: int = int(GRID_SIZE)):
     """Render an antialiased canvas preview at exactly ``width`` by ``height`` pixels."""
     from PIL import Image
 
     width, height = max(1, int(width)), max(1, int(height))
     oversample = max(1, int(oversample))
-    image = _render_at_size(document, width * oversample, height * oversample, False, show_grid)
+    image = _render_at_size(document, width * oversample, height * oversample, False, show_grid, grid_size)
     if oversample == 1:
         return image
     return image.resize((width, height), Image.Resampling.LANCZOS)

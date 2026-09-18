@@ -86,6 +86,8 @@ class ModelTests(unittest.TestCase):
     def test_grid_snapping_matches_the_visible_grid(self):
         self.assertEqual(snap_value(570), 580)
         self.assertEqual(snap_value(230), 240)
+        self.assertEqual(snap_value(26, 10), 30)
+        self.assertEqual(snap_value(26, 40), 40)
         for document in templates():
             for vertex in document.vertices:
                 self.assertEqual(vertex.x % GRID_SIZE, 0)
@@ -130,6 +132,15 @@ class GeometryTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    @unittest.skipUnless(Image is not None, "Pillow is not installed")
+    def test_preview_grid_spacing_changes_visible_lines(self):
+        document = blank_diagram()
+        fine = render_preview(document, 720, 480, True, oversample=1, grid_size=10)
+        standard = render_preview(document, 720, 480, True, oversample=1, grid_size=20)
+        coarse = render_preview(document, 720, 480, True, oversample=1, grid_size=40)
+        self.assertNotEqual(fine.getpixel((10, 100)), standard.getpixel((10, 100)))
+        self.assertNotEqual(standard.getpixel((20, 100)), coarse.getpixel((20, 100)))
+
     def test_moved_propagator_label_appears_at_same_position_in_exports(self):
         document = blank_diagram()
         start, end = make_vertex(100, 200), make_vertex(620, 200)
