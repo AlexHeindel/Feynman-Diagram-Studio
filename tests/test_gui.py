@@ -153,6 +153,26 @@ class GuiSmokeTests(unittest.TestCase):
             app._finish_title_edit(False)
             self.assertIsNone(app.title_entry)
             self.assertEqual(app.document.title, "Untitled diagram")
+
+        finally:
+            root.destroy()
+
+    def test_file_menu_quit_exits_without_popup_error(self):
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest("A GUI display is unavailable: {}".format(exc))
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                with patch.object(StudioApp, "_autosave_path", return_value=Path(directory) / "autosave.json"):
+                    app = StudioApp(root)
+                    file_menu = app.visible_menus["File"]
+                    quit_index = next(index for index in range(file_menu.index("end") + 1)
+                                      if file_menu.type(index) == "command" and file_menu.entrycget(index, "label") == "Quit")
+                    with patch.object(file_menu, "tk_popup", side_effect=lambda *_: file_menu.invoke(quit_index)) as popup:
+                        app.menu_buttons["File"].invoke()
+                        popup.assert_called_once()
+                    self.assertTrue(root.winfo_exists())
         finally:
             root.destroy()
 

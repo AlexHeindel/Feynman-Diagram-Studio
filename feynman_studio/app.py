@@ -189,7 +189,7 @@ class StudioApp:
             menu.add_command(label="Export…", accelerator=shortcut + "+E", command=self.show_export_dialog)
             menu.add_command(label="LaTeX Source…", command=self.show_latex_dialog)
             menu.add_separator()
-            menu.add_command(label="Quit", command=self.root.destroy)
+            menu.add_command(label="Quit", command=self.root.quit)
         elif name == "Edit":
             menu.add_command(label="Undo", accelerator=shortcut + "+Z", command=self.undo)
             menu.add_command(label="Redo", accelerator=shortcut + "+Shift+Z", command=self.redo)
