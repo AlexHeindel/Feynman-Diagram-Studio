@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Feynman Diagram Studio Web</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <div id="app" aria-busy="true">
+      <header class="appbar">
+        <nav class="menus" aria-label="Application menus">
+          <details class="menu">
+            <summary>File</summary>
+            <div class="menu-panel">
+              <button type="button" data-action="new">New Blank Diagram <kbd>⌘N</kbd></button>
+              <button type="button" data-action="open">Open… <kbd>⌘O</kbd></button>
+              <button type="button" data-action="save">Save <kbd>⌘S</kbd></button>
+              <button type="button" data-action="save">Save As… <kbd>⇧⌘S</kbd></button>
+              <hr>
+              <button type="button" data-action="export">Export… <kbd>⌘E</kbd></button>
+              <button type="button" data-action="latex">LaTeX Source…</button>
+              <hr>
+              <button type="button" data-action="shutdown">Stop web app</button>
+            </div>
+          </details>
+          <details class="menu">
+            <summary>Edit</summary>
+            <div class="menu-panel">
+              <button type="button" data-action="undo">Undo <kbd>⌘Z</kbd></button>
+              <button type="button" data-action="redo">Redo <kbd>⇧⌘Z</kbd></button>
+              <hr>
+              <button type="button" data-action="rename">Rename Diagram…</button>
+              <button type="button" data-action="delete">Delete Selection <kbd>⌫</kbd></button>
+            </div>
+          </details>
+          <details class="menu">
+            <summary>View</summary>
+            <div class="menu-panel menu-form">
+              <label><input id="menu-snap" type="checkbox" checked> Snap to Grid</label>
+              <label><input id="menu-grid" type="checkbox"> Show Page Grid</label>
+              <label>Grid Spacing
+                <select id="menu-grid-size">
+                  <option value="10">Fine · 10 units</option>
+                  <option value="20" selected>Standard · 20 units</option>
+                  <option value="40">Coarse · 40 units</option>
+                </select>
+              </label>
+              <label>Theme
+                <select id="menu-theme">
+                  <option value="automatic">Automatic</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+            </div>
+          </details>
+          <details class="menu">
+            <summary>Tools</summary>
+            <div class="menu-panel">
+              <button type="button" data-tool="select">Select <kbd>V</kbd></button>
+              <button type="button" data-tool="vertex">Add Vertex <kbd>A</kbd></button>
+              <button type="button" data-tool="connect">Connect Vertices <kbd>C</kbd></button>
+              <button type="button" data-tool="loop">Add Loop <kbd>L</kbd></button>
+            </div>
+          </details>
+          <details class="menu">
+            <summary>Help</summary>
+            <div class="menu-panel">
+              <button type="button" data-action="shortcuts">Keyboard Shortcuts</button>
+              <button type="button" data-action="about">About</button>
+            </div>
+          </details>
+        </nav>
+        <div class="file-controls" aria-label="File controls">
+          <button type="button" data-action="open">Open</button>
+          <button type="button" data-action="save">Save</button>
+          <button type="button" data-action="latex">LaTeX</button>
+          <button type="button" data-action="export" class="primary">Export…</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="library panel" aria-label="Diagram library">
+          <div class="split-buttons">
+            <button id="undo" type="button" data-action="undo">↶ Undo</button>
+            <button id="redo" type="button" data-action="redo">↷ Redo</button>
+          </div>
+          <button type="button" data-action="new" class="wide">＋ New blank diagram</button>
+          <h2>Starting points</h2>
+          <div id="templates" class="item-list" role="listbox" aria-label="Starting points"></div>
+          <hr>
+          <h2>Objects</h2>
+          <div id="objects" class="item-list objects" role="listbox" aria-label="Diagram objects"></div>
+          <p id="version" class="muted version"></p>
+        </aside>
+
+        <section class="editor" aria-label="Diagram editor">
+          <div class="editor-heading">
+            <span class="eyebrow">Feynman diagram</span>
+            <button id="diagram-title" class="title-button" type="button" title="Double-click to rename"></button>
+          </div>
+          <div id="tool-buttons" class="tool-buttons" aria-label="Diagram tools">
+            <button type="button" data-tool="select">Select</button>
+            <button type="button" data-tool="vertex">Vertex</button>
+            <button type="button" data-tool="connect">Connect</button>
+            <button type="button" data-tool="loop">Loop</button>
+          </div>
+          <div class="canvas-stage">
+            <svg id="diagram-canvas" viewBox="0 0 720 480" role="img" aria-label="Editable Feynman diagram"></svg>
+          </div>
+          <p id="hint" class="hint"></p>
+        </section>
+
+        <aside id="inspector" class="inspector panel" aria-label="Inspector"></aside>
+      </main>
+
+      <footer class="statusbar">
+        <span id="object-count"></span>
+        <span id="status" role="status">Local workspace</span>
+      </footer>
+    </div>
+
+    <input id="project-file" type="file" accept="application/json,.json" hidden>
+
+    <dialog id="rename-dialog">
+      <form method="dialog" id="rename-form">
+        <div class="dialog-heading">
+          <div><span class="eyebrow">Diagram</span><h2>Rename diagram</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <label class="field">Title<input id="rename-input" maxlength="100" required></label>
+        <div class="dialog-actions"><button value="cancel">Cancel</button><button value="default" class="primary">Rename</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="export-dialog">
+      <form method="dialog" id="export-form">
+        <div class="dialog-heading">
+          <div><span class="eyebrow">Output</span><h2>Export diagram</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <div class="dialog-grid">
+          <label class="field">Format<select id="export-format"><option>svg</option><option>pdf</option><option>png</option><option>jpg</option></select></label>
+          <label class="field">Resolution<select id="export-ppi"><option>300</option><option selected>600</option><option>1200</option></select></label>
+        </div>
+        <label class="check"><input id="export-transparent" type="checkbox"> Transparent background (SVG/PNG)</label>
+        <p class="muted">Exports use the same renderer as the desktop app.</p>
+        <div class="dialog-actions"><button value="cancel">Cancel</button><button id="export-submit" value="default" class="primary">Export</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="latex-dialog" class="large-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><span class="eyebrow">LaTeX</span><h2>Source code</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close">×</button>
+        </div>
+        <label class="field">Format<select id="latex-format"></select></label>
+        <textarea id="latex-source" readonly spellcheck="false" aria-label="LaTeX source"></textarea>
+        <div class="dialog-actions">
+          <button value="cancel">Close</button>
+          <button id="copy-standalone" type="button">Copy test document</button>
+          <button id="copy-latex" type="button" class="primary">Copy LaTeX</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="message-dialog">
+      <form method="dialog">
+        <div class="dialog-heading"><div><span class="eyebrow">Feynman Diagram Studio</span><h2 id="message-title"></h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+        <div id="message-body" class="message-body"></div>
+        <div class="dialog-actions"><button value="default" class="primary">OK</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast" role="alert" aria-live="assertive"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
