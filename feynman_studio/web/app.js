@@ -34,7 +34,10 @@ const state = {
   showGrid: false,
   gridSize: 20,
   theme: "automatic",
+  libraryWidth: null,
+  inspectorWidth: null,
   drag: null,
+  sidebarDrag: null,
   autosaveTimer: null,
   latexSource: "",
   standaloneSource: "",
@@ -151,7 +154,9 @@ function geometry(a, b, edge, laneOffset = 0) {
     const fraction = (distance - lengths[sampleIndex - 1]) / (lengths[sampleIndex] - lengths[sampleIndex - 1] || 1);
     const point = sample((sampleIndex - 1 + fraction) / 200);
     const phase = 2 * Math.PI * cycles * index / count;
-    const taper = Math.min(1, index / 8, (count - index) / 8);
+    const taper = edge.kind === "gluon"
+      ? Math.min(1, distance / 15)
+      : Math.min(1, index / 8, (count - index) / 8);
     const normal = edge.kind === "photon" ? 5 * Math.sin(phase) : edge.kind === "gluon" ? 7 * Math.sin(phase) : 0;
     const along = edge.kind === "gluon" ? 6 * (Math.cos(phase) - 1) * taper : 0;
     return { x: point.x + point.nx * normal * taper + point.tx * along, y: point.y + point.ny * normal * taper + point.ty * along };
@@ -185,6 +190,46 @@ function displayLabel(source) {
     .replace(/\^([A-Za-z0-9+\-=])/g, (_, value) => translateScript(value, superscript, "^"))
     .replace(/_([A-Za-z0-9+\-=])/g, (_, value) => translateScript(value, subscript, "_"))
     .replace(/[{}]/g, "");
+}
+
+function plainTexAtom(value) {
+  return value
+    .replace(/\\([A-Za-z]+)/g, (_, word) => texWords[word] ?? `\\${word}`)
+    .replace(/[{}]/g, "");
+}
+
+function labelRuns(source) {
+  if (!source || /\\(?:frac|mathrm|mathbf|mathit|text)\b/.test(source)) {
+    return [{ text: displayLabel(source), script: 0, overbar: false }];
+  }
+  const token = /\\(?:bar|overline)\{((?:\\[A-Za-z]+|[^{}])+)\}|([_^])\{([^{}]+)\}|([_^])([A-Za-z0-9+\-=])|\\([A-Za-z]+)|([^{}])/g;
+  const runs = [];
+  for (const match of source.matchAll(token)) {
+    const [, overbar, groupedScript, groupedValue, singleScript, singleValue, command, literal] = match;
+    if (overbar !== undefined) runs.push({ text: plainTexAtom(overbar), script: 0, overbar: true });
+    else if (groupedScript !== undefined) runs.push({ text: plainTexAtom(groupedValue), script: groupedScript === "^" ? -1 : 1, overbar: false });
+    else if (singleScript !== undefined) runs.push({ text: singleValue, script: singleScript === "^" ? -1 : 1, overbar: false });
+    else if (command !== undefined) runs.push({ text: texWords[command] ?? `\\${command}`, script: 0, overbar: false });
+    else if (literal) runs.push({ text: literal, script: 0, overbar: false });
+  }
+  return runs.length ? runs : [{ text: displayLabel(source), script: 0, overbar: false }];
+}
+
+function svgLabel(source) {
+  return labelRuns(source).map((run) => {
+    const attributes = [
+      run.script ? `baseline-shift="${run.script < 0 ? "super" : "sub"}" font-size="72%"` : "",
+      run.overbar ? 'text-decoration="overline"' : "",
+    ].filter(Boolean).join(" ");
+    return `<tspan${attributes ? ` ${attributes}` : ""}>${escapeXml(run.text)}</tspan>`;
+  }).join("");
+}
+
+function htmlLabel(source) {
+  return labelRuns(source).map((run) => {
+    const classes = [run.script ? `math-script ${run.script < 0 ? "sup" : "sub"}` : "", run.overbar ? "math-overbar" : ""].filter(Boolean).join(" ");
+    return classes ? `<span class="${classes}">${escapeXml(run.text)}</span>` : escapeXml(run.text);
+  }).join("");
 }
 
 function markerArtwork(vertex, stroke) {
@@ -248,12 +293,12 @@ function artwork(documentModel) {
       const point = geometry(start, end, edge).middle;
       const x = point.x + point.nx * edge.labelOffset + edge.labelX;
       const y = point.y + point.ny * edge.labelOffset + edge.labelY;
-      labels.push(`<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="${edge.color}">${escapeXml(displayLabel(edge.label))}</text>`);
+      labels.push(`<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="${edge.color}">${svgLabel(edge.label)}</text>`);
     }
   }
   for (const vertex of documentModel.vertices) {
     paths.push(markerArtwork(vertex, stroke));
-    if (vertex.label) labels.push(`<text x="${vertex.x + vertex.labelX}" y="${vertex.y + vertex.labelY}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="#172333">${escapeXml(displayLabel(vertex.label))}</text>`);
+    if (vertex.label) labels.push(`<text x="${vertex.x + vertex.labelX}" y="${vertex.y + vertex.labelY}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="#172333">${svgLabel(vertex.label)}</text>`);
   }
   return paths.join("") + labels.join("");
 }
@@ -349,10 +394,83 @@ function scheduleAutosave() {
   }, 500);
 }
 
+function sidebarWidth(side) {
+  return Math.round($(side === "library" ? ".library" : ".inspector").getBoundingClientRect().width);
+}
+
+function setSidebarWidth(side, requestedWidth) {
+  const workspace = $(".workspace");
+  const other = side === "library" ? "inspector" : "library";
+  const minimum = side === "library" ? 170 : 220;
+  const maximum = Math.max(minimum, Math.min(440, workspace.clientWidth - sidebarWidth(other) - 352));
+  const width = clamp(Math.round(requestedWidth), minimum, maximum);
+  state[`${side}Width`] = width;
+  workspace.style.setProperty(`--${side}-width`, `${width}px`);
+  const handle = $(`.${side}-resizer`);
+  handle.setAttribute("aria-valuemin", String(minimum));
+  handle.setAttribute("aria-valuemax", String(maximum));
+  handle.setAttribute("aria-valuenow", String(width));
+  handle.setAttribute("aria-valuetext", `${width} pixels`);
+}
+
+function applySidebarWidths() {
+  const workspace = $(".workspace");
+  for (const side of ["library", "inspector"]) {
+    const width = state[`${side}Width`];
+    if (Number.isFinite(width)) workspace.style.setProperty(`--${side}-width`, `${width}px`);
+    else workspace.style.removeProperty(`--${side}-width`);
+  }
+  if (window.matchMedia("(min-width: 781px)").matches) {
+    if (Number.isFinite(state.libraryWidth)) setSidebarWidth("library", state.libraryWidth);
+    if (Number.isFinite(state.inspectorWidth)) setSidebarWidth("inspector", state.inspectorWidth);
+  }
+  for (const side of ["library", "inspector"]) {
+    const width = sidebarWidth(side);
+    $(`.${side}-resizer`).setAttribute("aria-valuenow", String(width));
+    $(`.${side}-resizer`).setAttribute("aria-valuetext", `${width} pixels`);
+  }
+}
+
+function beginSidebarResize(event) {
+  if (event.button !== 0 || !window.matchMedia("(min-width: 781px)").matches) return;
+  const side = event.currentTarget.classList.contains("library-resizer") ? "library" : "inspector";
+  state.sidebarDrag = { side, startX: event.clientX, startWidth: sidebarWidth(side) };
+  event.currentTarget.setPointerCapture(event.pointerId);
+  document.body.classList.add("resizing-sidebar");
+  event.preventDefault();
+}
+
+function moveSidebarResize(event) {
+  if (!state.sidebarDrag || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+  const { side, startX, startWidth } = state.sidebarDrag;
+  const delta = event.clientX - startX;
+  setSidebarWidth(side, startWidth + (side === "library" ? delta : -delta));
+}
+
+function endSidebarResize(event) {
+  if (!state.sidebarDrag) return;
+  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  const side = state.sidebarDrag.side;
+  state.sidebarDrag = null;
+  document.body.classList.remove("resizing-sidebar");
+  persistSettings();
+  setStatus(`${titleCase(side)} width: ${sidebarWidth(side)} px`);
+}
+
+function resizeSidebarWithKeyboard(event) {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || !window.matchMedia("(min-width: 781px)").matches) return;
+  const side = event.currentTarget.classList.contains("library-resizer") ? "library" : "inspector";
+  const direction = event.key === "ArrowRight" ? 1 : -1;
+  setSidebarWidth(side, sidebarWidth(side) + direction * (side === "library" ? 20 : -20));
+  persistSettings();
+  event.preventDefault();
+}
+
 function persistSettings() {
   try {
     localStorage.setItem(SETTINGS_STORE, JSON.stringify({
       snap: state.snap, showGrid: state.showGrid, gridSize: state.gridSize, theme: state.theme,
+      libraryWidth: state.libraryWidth, inspectorWidth: state.inspectorWidth,
     }));
   } catch (_error) {
     // Editor settings can safely remain session-only.
@@ -466,8 +584,7 @@ function renderLists() {
   templates.innerHTML = state.templates.map((documentModel, index) => `<button type="button" role="option" data-template="${index}" title="Load ${escapeXml(documentModel.title)}">${escapeXml(documentModel.title)}</button>`).join("");
   const objects = [];
   state.document.vertices.forEach((vertex, index) => {
-    const label = displayLabel(vertex.label);
-    objects.push(`<button type="button" role="option" data-object="${escapeXml(vertex.id)}" aria-selected="${vertex.id === state.selected}">Vertex ${index + 1}${label ? ` · ${escapeXml(label)}` : ""}</button>`);
+    objects.push(`<button type="button" role="option" data-object="${escapeXml(vertex.id)}" aria-selected="${vertex.id === state.selected}" title="Vertex ${index + 1}${vertex.label ? ` · ${escapeXml(displayLabel(vertex.label))}` : ""}">Vertex ${index + 1}${vertex.label ? ` · ${htmlLabel(vertex.label)}` : ""}</button>`);
   });
   state.document.edges.forEach((edge, index) => {
     objects.push(`<button type="button" role="option" data-object="${escapeXml(edge.id)}" aria-selected="${edge.id === state.selected}">${titleCase(edge.kind)} ${index + 1}</button>`);
@@ -1010,6 +1127,15 @@ function bindEvents() {
   canvas.addEventListener("pointerup", canvasUp);
   canvas.addEventListener("pointercancel", canvasUp);
 
+  $$(".sidebar-resizer").forEach((resizer) => {
+    resizer.addEventListener("pointerdown", beginSidebarResize);
+    resizer.addEventListener("pointermove", moveSidebarResize);
+    resizer.addEventListener("pointerup", endSidebarResize);
+    resizer.addEventListener("pointercancel", endSidebarResize);
+    resizer.addEventListener("keydown", resizeSidebarWithKeyboard);
+  });
+  window.addEventListener("resize", applySidebarWidths);
+
   document.addEventListener("keydown", (event) => {
     const editing = event.target.closest("input, textarea, select, [contenteditable='true']");
     const dialogOpen = $("dialog[open]");
@@ -1060,9 +1186,12 @@ function loadSettings() {
     if (typeof settings.showGrid === "boolean") state.showGrid = settings.showGrid;
     if ([10, 20, 40].includes(settings.gridSize)) state.gridSize = settings.gridSize;
     if (["automatic", "light", "dark"].includes(settings.theme)) state.theme = settings.theme;
+    if (Number.isFinite(settings.libraryWidth)) state.libraryWidth = settings.libraryWidth;
+    if (Number.isFinite(settings.inspectorWidth)) state.inspectorWidth = settings.inspectorWidth;
   } catch (_error) {
     // Defaults remain usable when browser storage is unavailable.
   }
+  applySidebarWidths();
   applyTheme(state.theme);
 }
 
