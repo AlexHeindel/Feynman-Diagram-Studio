@@ -25,6 +25,14 @@ body {
   color: var(--text);
 }
 
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 body[data-theme="dark"] {
   --bg: #10161f;
   --panel: #171f2a;
@@ -84,6 +92,7 @@ button.wide { width: 100%; }
   position: relative;
   z-index: 20;
   display: flex;
+  flex: none;
   justify-content: space-between;
   gap: 16px;
   min-height: 44px;
@@ -136,9 +145,11 @@ button.wide { width: 100%; }
 
 .workspace {
   display: grid;
+  flex: 1;
   grid-template-columns: 220px minmax(340px, 1fr) 280px;
   grid-template-areas: "library editor inspector";
-  min-height: calc(100vh - 75px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panel { background: var(--panel); }
@@ -260,6 +271,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .color-row input[type="color"] { width: 40px; height: 32px; padding: 2px; }
 
 .statusbar {
+  flex: none;
   position: relative;
   z-index: 10;
   display: flex;
@@ -318,14 +330,22 @@ dialog .eyebrow { margin: 0; }
 }
 
 @media (max-width: 780px) {
+  #app {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+  }
   .appbar { position: sticky; top: 0; flex-wrap: wrap; gap: 5px; }
   .menus { width: 100%; justify-content: space-between; }
   .file-controls { width: 100%; }
   .file-controls button { flex: 1; }
   .workspace {
+    flex: none;
     grid-template-columns: 1fr;
     grid-template-areas: "editor" "library" "inspector";
     min-height: 0;
+    overflow: visible;
   }
   .editor { min-height: 650px; }
   .library, .inspector { border: 0; border-top: 1px solid var(--border); }
