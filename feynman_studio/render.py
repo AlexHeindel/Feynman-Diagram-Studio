@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
-from .geometry import edge_label_position, geometry, momentum_geometry
+from .geometry import connected_geometry, edge_label_position, geometry, momentum_geometry
 from .model import GRID_SIZE, HEIGHT, WIDTH, Diagram, Edge, Vertex, FreeLabel, bundle_offsets
 
 Point = Tuple[float, float]
@@ -196,7 +196,7 @@ def make_scene(document: Diagram) -> List[Primitive]:
             continue
         dash = (9, 7) if edge.kind == "scalar" else (1, 7) if edge.kind == "ghost" else ()
         for offset in bundle_offsets(edge):
-            points, middle = geometry(start, end, edge, offset)
+            points, middle = connected_geometry(document, edge, offset)
             scene.append(Polyline(points, edge.color, stroke, dash))
             if edge.arrow != "none":
                 sign = 1 if edge.arrow == "forward" else -1

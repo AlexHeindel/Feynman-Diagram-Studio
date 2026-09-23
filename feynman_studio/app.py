@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from . import __version__
-from .geometry import distance_to_polyline, edge_label_position, geometry, momentum_geometry
+from .geometry import connected_geometry, distance_to_polyline, edge_label_position, geometry, momentum_geometry
 from .latex import FORMATS, latex_source, standalone_source, unsupported_features
 from .model import (
     GRID_SIZE,
@@ -29,6 +29,7 @@ from .model import (
     Momentum,
     Vertex,
     blank_diagram,
+    bundle_offsets,
     make_edge,
     make_annotation,
     make_vertex,
@@ -595,9 +596,8 @@ class StudioApp:
             self.canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill="white", outline=color, width=2, tags="controls")
         edge = self.document.edge(self.selected or "")
         if edge:
-            start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
-            if start and end:
-                points, _ = geometry(start, end, edge)
+            for offset in bundle_offsets(edge):
+                points, _ = connected_geometry(self.document, edge, offset)
                 coordinates = [coordinate for point in points for coordinate in self._screen(*point)]
                 self.canvas.create_line(*coordinates, fill="#2563eb", width=2, dash=(5, 4), tags="controls")
         annotation = self.document.annotation(self.selected or "")
@@ -678,10 +678,11 @@ class StudioApp:
         for edge in self.document.edges:
             start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
             if start and end:
-                points, _ = geometry(start, end, edge)
-                distance = distance_to_polyline(x, y, points)
-                if distance < best[0]:
-                    best = (distance, edge)
+                for offset in bundle_offsets(edge):
+                    points, _ = connected_geometry(self.document, edge, offset)
+                    distance = distance_to_polyline(x, y, points)
+                    if distance < best[0]:
+                        best = (distance, edge)
                 if edge.momentum:
                     momentum_points, _, _ = momentum_geometry(start, end, edge)
                     distance = distance_to_polyline(x, y, momentum_points)

@@ -142,14 +142,22 @@ function circularArc(a, b, side, t) {
   return { x: center.x + radius * Math.cos(angle), y: center.y + radius * Math.sin(angle), tx, ty, nx: -ty, ny: tx };
 }
 
-function geometry(a, b, edge, laneOffset = 0) {
+function edgeSample(a, b, edge, t) {
   const isLoop = Math.hypot(b.x - a.x, b.y - a.y) < 0.01;
+  return isLoop
+    ? selfLoop(a, edge.loopSize, edge.loopAngle, t)
+    : edge.circular
+      ? circularArc(a, b, edge.curvature || 1, t)
+      : curve(a, b, edge.curvature, t);
+}
+
+function pathData(values) {
+  return values.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(3)},${point.y.toFixed(3)}`).join(" ");
+}
+
+function geometry(a, b, edge, laneOffset = 0) {
   const sample = (t) => {
-    const point = isLoop
-      ? selfLoop(a, edge.loopSize, edge.loopAngle, t)
-      : edge.circular
-        ? circularArc(a, b, edge.curvature || 1, t)
-        : curve(a, b, edge.curvature, t);
+    const point = edgeSample(a, b, edge, t);
     return { ...point, x: point.x + point.nx * laneOffset, y: point.y + point.ny * laneOffset };
   };
   const center = Array.from({ length: 201 }, (_, index) => sample(index / 200));
@@ -174,8 +182,58 @@ function geometry(a, b, edge, laneOffset = 0) {
     const along = edge.kind === "gluon" ? 6 * (Math.cos(phase) - 1) * taper : 0;
     return { x: point.x + point.nx * normal * taper + point.tx * along, y: point.y + point.ny * normal * taper + point.ty * along };
   });
-  const path = (values) => values.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(3)},${point.y.toFixed(3)}`).join(" ");
-  return { path: path(points), baseline: path(center), middle: sample(0.5) };
+  return { points, path: pathData(points), baseline: pathData(center), middle: sample(0.5) };
+}
+
+function connectEndpoint(points, join, tangent, atStart) {
+  const endpoint = atStart ? points[0] : points.at(-1);
+  const longitudinal = (join.x - endpoint.x) * tangent.tx + (join.y - endpoint.y) * tangent.ty;
+  if (atStart) {
+    let index = 0;
+    while (longitudinal > 0 && index < points.length - 2 &&
+      (points[index].x - endpoint.x) * tangent.tx + (points[index].y - endpoint.y) * tangent.ty < longitudinal) index += 1;
+    return [join, ...points.slice(index)];
+  }
+  let index = points.length - 1;
+  while (longitudinal < 0 && index > 1 &&
+    (points[index].x - endpoint.x) * tangent.tx + (points[index].y - endpoint.y) * tangent.ty > longitudinal) index -= 1;
+  return [...points.slice(0, index + 1), join];
+}
+
+function connectedGeometry(documentModel, edge, laneOffset) {
+  const a = documentModel.vertices.find((vertex) => vertex.id === edge.from);
+  const b = documentModel.vertices.find((vertex) => vertex.id === edge.to);
+  if (edge.kind !== "fermion" || edge.bundle < 2 || edge.from === edge.to) return geometry(a, b, edge, laneOffset);
+  const lane = bundleOffsets(edge).indexOf(laneOffset);
+  const join = (vertex, t) => {
+    const incident = documentModel.edges.filter((item) => item.kind === "fermion" && item.bundle === edge.bundle && item.from !== item.to &&
+      (item.from === vertex.id || item.to === vertex.id));
+    if (incident.length !== 2 || !incident.some((item) => item.id === edge.id)) return null;
+    const other = incident.find((item) => item.id !== edge.id);
+    const otherA = documentModel.vertices.find((item) => item.id === other.from);
+    const otherB = documentModel.vertices.find((item) => item.id === other.to);
+    const otherT = other.from === vertex.id ? 0 : 1;
+    const normal = edgeSample(a, b, edge, t);
+    const otherNormal = edgeSample(otherA, otherB, other, otherT);
+    const aligned = (edge.from === vertex.id) !== (other.from === vertex.id);
+    const otherLane = bundleOffsets(other)[aligned ? lane : edge.bundle - 1 - lane];
+    const p = { x: vertex.x + normal.nx * laneOffset, y: vertex.y + normal.ny * laneOffset };
+    const q = { x: vertex.x + otherNormal.nx * otherLane, y: vertex.y + otherNormal.ny * otherLane };
+    const cross = normal.tx * otherNormal.ty - normal.ty * otherNormal.tx;
+    if (Math.abs(cross) > 1e-6) {
+      const along = ((q.x - p.x) * otherNormal.ty - (q.y - p.y) * otherNormal.tx) / cross;
+      const miter = { x: p.x + normal.tx * along, y: p.y + normal.ty * along };
+      if (Math.hypot(miter.x - vertex.x, miter.y - vertex.y) <=
+        Math.max(8, 2 * Math.max(Math.abs(laneOffset), Math.abs(otherLane)))) return miter;
+    }
+    return { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+  };
+  const result = geometry(a, b, edge, laneOffset);
+  let points = result.points;
+  const start = join(a, 0), end = join(b, 1);
+  if (start) points = connectEndpoint(points, start, edgeSample(a, b, edge, 0), true);
+  if (end) points = connectEndpoint(points, end, edgeSample(a, b, edge, 1), false);
+  return { ...result, points, path: pathData(points) };
 }
 
 function momentumGeometry(a, b, edge) {
@@ -321,7 +379,7 @@ function artwork(documentModel) {
     if (!start || !end) continue;
     const dash = edge.kind === "scalar" ? ' stroke-dasharray="9 7"' : edge.kind === "ghost" ? ' stroke-dasharray="1 7"' : "";
     for (const offset of bundleOffsets(edge)) {
-      const shape = geometry(start, end, edge, offset);
+      const shape = connectedGeometry(documentModel, edge, offset);
       paths.push(`<path d="${shape.path}" fill="none" stroke="${edge.color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`);
       if (edge.arrow !== "none") {
         const sign = edge.arrow === "forward" ? 1 : -1;
@@ -396,9 +454,9 @@ function renderCanvas() {
     const start = vertexById(edge.from);
     const end = vertexById(edge.to);
     if (!start || !end) continue;
-    const baseline = geometry(start, end, edge).baseline;
     const id = escapeXml(edge.id);
-    edgeHits.push(`<path class="hit hit-edge" data-kind="edge" data-id="${id}" d="${baseline}"/>`);
+    const lanes = bundleOffsets(edge).map((offset) => connectedGeometry(state.document, edge, offset));
+    for (const lane of lanes) edgeHits.push(`<path class="hit hit-edge" data-kind="edge" data-id="${id}" d="${lane.path}"/>`);
     if (edge.momentum) {
       const path = momentumGeometry(start, end, edge);
       edgeHits.push(`<polyline class="hit hit-edge" data-kind="edge" data-id="${id}" points="${path.points.map((p) => `${p.x},${p.y}`).join(" ")}"/>`);
@@ -407,7 +465,7 @@ function renderCanvas() {
         labelHits.push(`<rect class="hit hit-label" data-kind="edge" data-id="${id}" x="${path.label.x - width / 2}" y="${path.label.y - font}" width="${width}" height="${font * 2}"/>`);
       }
     }
-    if (edge.id === state.selected) controls.push(`<path class="edge-selection" d="${baseline}"/>`);
+    if (edge.id === state.selected) for (const lane of lanes) controls.push(`<path class="edge-selection" d="${lane.path}"/>`);
     if (edge.label) {
       const position = labelPosition(edge);
       const width = Math.max(28, displayLabel(edge.label).length * font * 0.7);

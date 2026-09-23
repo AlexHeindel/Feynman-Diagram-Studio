@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Tuple
 
-from .geometry import edge_label_position, geometry, momentum_geometry
+from .geometry import connected_geometry, edge_label_position, geometry, momentum_geometry
 from .model import HEIGHT, WIDTH, Diagram, Edge, Vertex, FreeLabel, bundle_offsets
 
 
@@ -87,7 +87,7 @@ def _tikz(document: Diagram, package: str) -> str:
         elif edge.arrow == "reverse":
             options.extend(("postaction={decorate}", "decoration={markings,mark=at position .5 with {\\arrow{<}}}"))
         for offset in bundle_offsets(edge):
-            points, _ = geometry(start, end, edge, offset)
+            points, _ = connected_geometry(document, edge, offset)
             # The sampled path makes the graphical export agree with the editor for every line type.
             sampled = points[:: max(1, len(points) // 90)]
             if sampled[-1] != points[-1]:
@@ -268,7 +268,7 @@ def _pst(document: Diagram) -> str:
         if start is None or end is None:
             continue
         for offset in bundle_offsets(edge):
-            points, _ = geometry(start, end, edge, offset)
+            points, _ = connected_geometry(document, edge, offset)
             sampled = points[:: max(1, len(points) // 80)]
             if sampled[-1] != points[-1]:
                 sampled.append(points[-1])
@@ -361,7 +361,7 @@ def _axo(document: Diagram) -> str:
         if start is None or end is None:
             continue
         for offset in bundle_offsets(edge):
-            points, middle = geometry(start, end, edge, offset)
+            points, middle = connected_geometry(document, edge, offset)
             sampled = points[:: max(1, len(points) // 100)]
             if sampled[-1] != points[-1]:
                 sampled.append(points[-1])

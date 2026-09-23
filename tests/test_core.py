@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from feynman_studio.geometry import curve, geometry, momentum_geometry
+from feynman_studio.geometry import connected_geometry, curve, geometry, momentum_geometry
 from feynman_studio.latex import FORMATS, latex_source, standalone_source, unsupported_features
 from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, bundle_offsets, make_edge, make_vertex, snap_value, templates
 from feynman_studio.render import Text, _label_runs, display_label, make_scene, render_preview, save_pdf, save_raster, svg_document
@@ -178,6 +178,55 @@ class GeometryTests(unittest.TestCase):
         lanes = [geometry(left, right, edge, offset)[0] for offset in bundle_offsets(edge)]
         for points, expected_y in zip(lanes, (220, 240, 260)):
             self.assertTrue(all(abs(y - expected_y) < 1e-9 for _, y in points))
+
+    def test_matching_quark_bundle_lanes_join_through_a_vertex(self):
+        start, vertex, end = make_vertex(100, 100), make_vertex(360, 240), make_vertex(620, 100)
+        incoming, outgoing = make_edge(start.id, vertex.id), make_edge(vertex.id, end.id)
+        incoming.bundle = outgoing.bundle = 3
+        incoming.bundleSpacing = outgoing.bundleSpacing = 20
+        document = Diagram(vertices=[start, vertex, end], edges=[incoming, outgoing])
+        joins = []
+        for offset in bundle_offsets(incoming):
+            left = connected_geometry(document, incoming, offset)[0]
+            right = connected_geometry(document, outgoing, offset)[0]
+            self.assertAlmostEqual(left[-1][0], right[0][0])
+            self.assertAlmostEqual(left[-1][1], right[0][1])
+            joins.append(left[-1])
+        self.assertTrue(joins[0][1] < joins[1][1] < joins[2][1])
+
+        outgoing.from_, outgoing.to = outgoing.to, outgoing.from_
+        for offset in bundle_offsets(incoming):
+            left = connected_geometry(document, incoming, offset)[0]
+            right = connected_geometry(document, outgoing, -offset)[0]
+            self.assertAlmostEqual(left[-1][0], right[-1][0])
+            self.assertAlmostEqual(left[-1][1], right[-1][1])
+
+    def test_sharp_quark_bundle_turns_do_not_hook_or_cross(self):
+        for start_position in ((250, 450), (390, 400)):
+            start = make_vertex(*start_position)
+            vertex, end = make_vertex(245, 130), make_vertex(700, 60)
+            incoming, outgoing = make_edge(start.id, vertex.id), make_edge(vertex.id, end.id)
+            incoming.bundle = outgoing.bundle = 3
+            incoming.bundleSpacing = outgoing.bundleSpacing = 20
+            document = Diagram(vertices=[start, vertex, end], edges=[incoming, outgoing])
+            paths = []
+            for edge in document.edges:
+                a, b = document.vertex(edge.from_), document.vertex(edge.to)
+                dx, dy = b.x - a.x, b.y - a.y
+                for offset in bundle_offsets(edge):
+                    points = connected_geometry(document, edge, offset)[0]
+                    for previous, current in zip(points, points[1:]):
+                        self.assertGreaterEqual((current[0] - previous[0]) * dx + (current[1] - previous[1]) * dy, -1e-8)
+                paths.append([connected_geometry(document, edge, offset)[0] for offset in bundle_offsets(edge)])
+            joined = [paths[0][lane][-80:] + paths[1][lane][:80] for lane in range(3)]
+            for first, second in ((0, 1), (0, 2), (1, 2)):
+                for p, q in zip(joined[first], joined[first][1:]):
+                    for r, s in zip(joined[second], joined[second][1:]):
+                        orient_a = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+                        orient_b = (q[0] - p[0]) * (s[1] - p[1]) - (q[1] - p[1]) * (s[0] - p[0])
+                        orient_c = (s[0] - r[0]) * (p[1] - r[1]) - (s[1] - r[1]) * (p[0] - r[0])
+                        orient_d = (s[0] - r[0]) * (q[1] - r[1]) - (s[1] - r[1]) * (q[0] - r[0])
+                        self.assertFalse(orient_a * orient_b < -1e-8 and orient_c * orient_d < -1e-8)
 
     def test_gluon_curls_stay_between_straight_line_endpoints(self):
         top, bottom = make_vertex(360, 100), make_vertex(360, 380)

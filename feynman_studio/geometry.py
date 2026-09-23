@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from typing import Callable, List, Sequence, Tuple
 
-from .model import Edge, Vertex
+from .model import Diagram, Edge, Vertex, bundle_offsets
 
 
 @dataclass(frozen=True)
@@ -74,16 +74,18 @@ def circular_arc(a: Vertex, b: Vertex, side: float, t: float) -> Sample:
     )
 
 
-def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[List[Tuple[float, float]], Sample]:
+def edge_sample(a: Vertex, b: Vertex, edge: Edge, t: float) -> Sample:
     is_loop = math.hypot(b.x - a.x, b.y - a.y) < 0.01
+    if is_loop:
+        return self_loop(a, edge.loopSize, edge.loopAngle, t)
+    if edge.circular:
+        return circular_arc(a, b, edge.curvature or 1, t)
+    return curve(a, b, edge.curvature, t)
 
+
+def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[List[Tuple[float, float]], Sample]:
     def sample(t: float) -> Sample:
-        if is_loop:
-            point = self_loop(a, edge.loopSize, edge.loopAngle, t)
-        elif edge.circular:
-            point = circular_arc(a, b, edge.curvature or 1, t)
-        else:
-            point = curve(a, b, edge.curvature, t)
+        point = edge_sample(a, b, edge, t)
         return Sample(point.x + point.nx * lane_offset, point.y + point.ny * lane_offset, point.tx, point.ty, point.nx, point.ny)
 
     center = [sample(index / 200) for index in range(201)]
@@ -111,6 +113,68 @@ def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[
         along = 6 * (math.cos(phase) - 1) * taper if edge.kind == "gluon" else 0
         points.append((point.x + point.nx * normal * taper + point.tx * along, point.y + point.ny * normal * taper + point.ty * along))
     return points, sample(0.5)
+
+
+def connect_endpoint(points: List[Tuple[float, float]], join: Tuple[float, float], tangent: Sample,
+                     at_start: bool) -> List[Tuple[float, float]]:
+    endpoint = points[0] if at_start else points[-1]
+    longitudinal = (join[0] - endpoint[0]) * tangent.tx + (join[1] - endpoint[1]) * tangent.ty
+    if at_start:
+        index = 0
+        while longitudinal > 0 and index < len(points) - 2 and (
+            (points[index][0] - endpoint[0]) * tangent.tx +
+            (points[index][1] - endpoint[1]) * tangent.ty < longitudinal
+        ):
+            index += 1
+        return [join] + points[index:]
+    index = len(points) - 1
+    while longitudinal < 0 and index > 1 and (
+        (points[index][0] - endpoint[0]) * tangent.tx +
+        (points[index][1] - endpoint[1]) * tangent.ty > longitudinal
+    ):
+        index -= 1
+    return points[:index + 1] + [join]
+
+
+def connected_geometry(document: Diagram, edge: Edge, lane_offset: float) -> Tuple[List[Tuple[float, float]], Sample]:
+    a, b = document.vertex(edge.from_), document.vertex(edge.to)
+    if a is None or b is None:
+        raise ValueError("This propagator has a missing endpoint.")
+    if edge.kind != "fermion" or edge.bundle < 2 or edge.from_ == edge.to:
+        return geometry(a, b, edge, lane_offset)
+    lane = bundle_offsets(edge).index(lane_offset)
+
+    def join(vertex: Vertex, t: int) -> Tuple[float, float] | None:
+        incident = [item for item in document.edges if item.kind == "fermion" and item.bundle == edge.bundle
+                    and item.from_ != item.to and (item.from_ == vertex.id or item.to == vertex.id)]
+        if len(incident) != 2 or all(item.id != edge.id for item in incident):
+            return None
+        other = next(item for item in incident if item.id != edge.id)
+        other_a, other_b = document.vertex(other.from_), document.vertex(other.to)
+        if other_a is None or other_b is None:
+            return None
+        other_t = 0 if other.from_ == vertex.id else 1
+        normal = edge_sample(a, b, edge, t)
+        other_normal = edge_sample(other_a, other_b, other, other_t)
+        aligned = (edge.from_ == vertex.id) != (other.from_ == vertex.id)
+        other_lane = bundle_offsets(other)[lane if aligned else edge.bundle - 1 - lane]
+        p = (vertex.x + normal.nx * lane_offset, vertex.y + normal.ny * lane_offset)
+        q = (vertex.x + other_normal.nx * other_lane, vertex.y + other_normal.ny * other_lane)
+        cross = normal.tx * other_normal.ty - normal.ty * other_normal.tx
+        if abs(cross) > 1e-6:
+            along = ((q[0] - p[0]) * other_normal.ty - (q[1] - p[1]) * other_normal.tx) / cross
+            miter = (p[0] + normal.tx * along, p[1] + normal.ty * along)
+            if math.hypot(miter[0] - vertex.x, miter[1] - vertex.y) <= max(8, 2 * max(abs(lane_offset), abs(other_lane))):
+                return miter
+        return ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+
+    points, middle = geometry(a, b, edge, lane_offset)
+    start, end = join(a, 0), join(b, 1)
+    if start:
+        points = connect_endpoint(points, start, edge_sample(a, b, edge, 0), True)
+    if end:
+        points = connect_endpoint(points, end, edge_sample(a, b, edge, 1), False)
+    return points, middle
 
 
 def edge_label_position(middle: Sample, edge: Edge) -> Tuple[float, float]:
