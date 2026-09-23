@@ -6,6 +6,7 @@ const KINDS = ["fermion", "photon", "gluon", "scalar", "ghost"];
 const MARKERS = ["none", "dot", "open", "filled", "hatched", "crosshatched", "dotted"];
 const ARROWS = ["forward", "reverse", "none"];
 const STORE = "feynman-diagram-studio.web.v1";
+const PROJECTS_STORE = "feynman-diagram-studio.web.projects.v1";
 const SETTINGS_STORE = "feynman-diagram-studio.web.settings.v1";
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -21,6 +22,8 @@ const titleCase = (value) => value.charAt(0).toUpperCase() + value.slice(1);
 const state = {
   token: "",
   templates: [],
+  projects: [],
+  activeProjectId: null,
   latexFormats: [],
   document: null,
   past: [],
@@ -29,11 +32,15 @@ const state = {
   tool: "select",
   connectionStart: null,
   newKind: "fermion",
+  newArrow: "auto",
+  newMarker: "dot",
+  newMarkerSize: 22,
   loopMode: "single",
   snap: true,
   showGrid: false,
+  showFigurePanel: false,
   gridSize: 20,
-  theme: "automatic",
+  theme: "dark",
   libraryWidth: null,
   inspectorWidth: null,
   drag: null,
@@ -175,12 +182,12 @@ function geometry(a, b, edge, laneOffset = 0) {
     const fraction = (distance - lengths[sampleIndex - 1]) / (lengths[sampleIndex] - lengths[sampleIndex - 1] || 1);
     const point = sample((sampleIndex - 1 + fraction) / 200);
     const phase = 2 * Math.PI * cycles * index / count;
-    const taper = edge.kind === "gluon"
-      ? Math.min(1, distance / 15)
-      : Math.min(1, index / 8, (count - index) / 8);
-    const normal = edge.kind === "photon" ? 5 * Math.sin(phase) : edge.kind === "gluon" ? 7 * Math.sin(phase) : 0;
-    const along = edge.kind === "gluon" ? 6 * (Math.cos(phase) - 1) * taper : 0;
-    return { x: point.x + point.nx * normal * taper + point.tx * along, y: point.y + point.ny * normal * taper + point.ty * along };
+    const taper = Math.min(1, index / 8, (count - index) / 8);
+    const normal = edge.kind === "gluon"
+      ? 7 * (1 - Math.cos(phase))
+      : edge.kind === "photon" ? 5 * Math.sin(phase) * taper : 0;
+    const along = edge.kind === "gluon" ? 6 * Math.sin(phase) : 0;
+    return { x: point.x + point.nx * normal + point.tx * along, y: point.y + point.ny * normal + point.ty * along };
   });
   return { points, path: pathData(points), baseline: pathData(center), middle: sample(0.5) };
 }
@@ -264,13 +271,13 @@ function momentumGeometry(a, b, edge) {
     { x: tip.x - sign * tip.tx * 12 + tip.nx * 5, y: tip.y - sign * tip.ty * 12 + tip.ny * 5 },
     { x: tip.x - sign * tip.tx * 12 - tip.nx * 5, y: tip.y - sign * tip.ty * 12 - tip.ny * 5 }];
   const middle = at((momentum.start + momentum.end) / 2);
-  return { points, arrow, label: { x: middle.x + side * middle.nx * 16, y: middle.y + side * middle.ny * 16 } };
+  return { points, arrow, label: { x: middle.x + side * middle.nx * 30 + (momentum.labelX ?? 0), y: middle.y + side * middle.ny * 30 + (momentum.labelY ?? 0) } };
 }
 
 const texWords = {
   alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", zeta: "ζ", eta: "η", theta: "θ",
   lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", sigma: "σ", tau: "τ", phi: "φ",
-  chi: "χ", psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ",
+  varphi: "ϕ", chi: "χ", psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ",
   Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω", bar: "",
 };
 const superscript = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾" };
@@ -442,12 +449,35 @@ function labelPosition(edge) {
   };
 }
 
+function labelLimits(source, x, y) {
+  const font = state.document.style.fontPt * WIDTH / ((state.document.style.widthMm * 72) / 25.4);
+  const width = Math.max(28, labelWidth(source, font));
+  const halfWidth = Math.min(width / 2, WIDTH / 2);
+  const halfHeight = Math.min(font * 0.8, HEIGHT / 2);
+  return { minX: halfWidth - x, maxX: WIDTH - halfWidth - x,
+    minY: halfHeight - y, maxY: HEIGHT - halfHeight - y };
+}
+
+const labelMeasure = document.createElement("canvas").getContext("2d");
+function labelWidth(source, font) {
+  return labelRuns(source).reduce((width, run) => {
+    labelMeasure.font = `${font * (run.script ? 0.72 : 1)}px "FDS Serif", serif`;
+    return width + labelMeasure.measureText(run.text).width;
+  }, 0);
+}
+
+function momentumLabelBase(edge) {
+  const point = momentumGeometry(vertexById(edge.from), vertexById(edge.to), edge).label;
+  return { x: point.x - (edge.momentum.labelX ?? 0), y: point.y - (edge.momentum.labelY ?? 0) };
+}
+
 function renderCanvas() {
   const canvas = $("#diagram-canvas");
   if (!state.document) return;
   const unit = WIDTH / (state.document.style.widthMm * 72 / 25.4);
   const font = state.document.style.fontPt * unit;
   const edgeHits = [];
+  const edgeSelection = [];
   const labelHits = [];
   const controls = [];
   for (const edge of state.document.edges) {
@@ -461,14 +491,17 @@ function renderCanvas() {
       const path = momentumGeometry(start, end, edge);
       edgeHits.push(`<polyline class="hit hit-edge" data-kind="edge" data-id="${id}" points="${path.points.map((p) => `${p.x},${p.y}`).join(" ")}"/>`);
       if (edge.momentum.label) {
-        const width = Math.max(28, displayLabel(edge.momentum.label).length * font * 0.7);
-        labelHits.push(`<rect class="hit hit-label" data-kind="edge" data-id="${id}" x="${path.label.x - width / 2}" y="${path.label.y - font}" width="${width}" height="${font * 2}"/>`);
+        const width = Math.max(28, labelWidth(edge.momentum.label, font));
+        labelHits.push(`<rect class="hit hit-label" data-kind="momentum-label" data-id="${id}" x="${path.label.x - width / 2}" y="${path.label.y - font}" width="${width}" height="${font * 2}"/>`);
       }
     }
-    if (edge.id === state.selected) for (const lane of lanes) controls.push(`<path class="edge-selection" d="${lane.path}"/>`);
+    if (state.tool === "select" && edge.id === state.selected) for (const lane of lanes) {
+      const points = lane.points.map((point) => `${point.x},${point.y}`).join(" ");
+      edgeSelection.push(`<polyline class="edge-selection halo" points="${points}"/><polyline class="edge-selection rim" points="${points}"/>`);
+    }
     if (edge.label) {
       const position = labelPosition(edge);
-      const width = Math.max(28, displayLabel(edge.label).length * font * 0.7);
+      const width = Math.max(28, labelWidth(edge.label, font));
       const height = Math.max(22, font * 1.6);
       labelHits.push(`<rect class="hit hit-label" data-kind="edge-label" data-id="${id}" x="${position.x - width / 2}" y="${position.y - height / 2}" width="${width}" height="${height}"/>`);
     }
@@ -476,7 +509,7 @@ function renderCanvas() {
   for (const item of state.document.annotations) {
     const id = escapeXml(item.id);
     if (item.type === "label") {
-      const width = Math.max(28, displayLabel(item.text).length * font * 0.7);
+      const width = Math.max(28, labelWidth(item.text, font));
       const height = Math.max(22, font * 1.6);
       labelHits.push(`<rect class="hit hit-label" data-kind="annotation-label" data-id="${id}" x="${item.x - width / 2}" y="${item.y - height / 2}" width="${width}" height="${height}"/>`);
     } else edgeHits.push(`<line class="hit hit-edge" data-kind="annotation-arrow" data-id="${id}" x1="${item.x1}" y1="${item.y1}" x2="${item.x2}" y2="${item.y2}"/>`);
@@ -488,16 +521,16 @@ function renderCanvas() {
     if (vertex.label) {
       const x = vertex.x + vertex.labelX;
       const y = vertex.y + vertex.labelY;
-      const width = Math.max(28, displayLabel(vertex.label).length * font * 0.7);
+      const width = Math.max(28, labelWidth(vertex.label, font));
       const height = Math.max(22, font * 1.6);
       labelHits.push(`<rect class="hit hit-label" data-kind="vertex-label" data-id="${id}" x="${x - width / 2}" y="${y - height / 2}" width="${width}" height="${height}"/>`);
     }
     const classes = ["handle", "hit", "hit-vertex"];
-    if (vertex.id === state.selected) classes.push("selected");
+    if (state.tool === "select" && vertex.id === state.selected) classes.push("selected");
     if (vertex.id === state.connectionStart) classes.push("connecting");
-    controls.push(`<circle class="${classes.join(" ")}" data-kind="vertex" data-id="${id}" cx="${vertex.x}" cy="${vertex.y}" r="${vertex.id === state.selected || vertex.id === state.connectionStart ? 7 : 4}"/>`);
+    controls.push(`<circle class="${classes.join(" ")}" data-kind="vertex" data-id="${id}" cx="${vertex.x}" cy="${vertex.y}" r="${(state.tool === "select" && vertex.id === state.selected) || vertex.id === state.connectionStart ? 7 : 4}"/>`);
   }
-  canvas.innerHTML = `${gridArtwork()}<g aria-hidden="true">${artwork(state.document)}</g>${edgeHits.join("")}${labelHits.join("")}${controls.join("")}`;
+  canvas.innerHTML = `${gridArtwork()}<g aria-hidden="true">${edgeSelection.join("")}${artwork(state.document)}</g>${edgeHits.join("")}${labelHits.join("")}${controls.join("")}`;
 }
 
 function setStatus(message) {
@@ -522,13 +555,22 @@ function showMessage(title, body) {
 function scheduleAutosave() {
   clearTimeout(state.autosaveTimer);
   state.autosaveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORE, JSON.stringify(state.document));
-      setStatus("Saved in this browser");
-    } catch (_error) {
-      notify("Browser autosave failed. Download the project with Save.");
-    }
+    if (persistProject()) setStatus("Saved in this browser");
   }, 500);
+}
+
+function persistProject() {
+  if (!state.document) return false;
+  const active = state.projects.find((project) => project.id === state.activeProjectId);
+  if (active) active.diagram = clone(state.document);
+  try {
+    localStorage.setItem(PROJECTS_STORE, JSON.stringify({ activeId: state.activeProjectId, projects: state.projects }));
+    localStorage.setItem(STORE, JSON.stringify(state.document));
+    return true;
+  } catch (_error) {
+    notify("Browser storage is unavailable. Use Save to keep a project file.");
+    return false;
+  }
 }
 
 function sidebarWidth(side) {
@@ -606,7 +648,7 @@ function resizeSidebarWithKeyboard(event) {
 function persistSettings() {
   try {
     localStorage.setItem(SETTINGS_STORE, JSON.stringify({
-      snap: state.snap, showGrid: state.showGrid, gridSize: state.gridSize, theme: state.theme,
+      snap: state.snap, showGrid: state.showGrid, showFigurePanel: state.showFigurePanel, gridSize: state.gridSize, theme: state.theme,
       libraryWidth: state.libraryWidth, inspectorWidth: state.inspectorWidth,
     }));
   } catch (_error) {
@@ -630,7 +672,14 @@ function commit(change, message = "Modified") {
   record(before, message);
 }
 
-function replaceDocument(documentModel, message) {
+function replaceDocument(documentModel, message, projectId = null) {
+  clearTimeout(state.autosaveTimer);
+  if (state.document) persistProject();
+  if (projectId) state.activeProjectId = projectId;
+  else {
+    state.activeProjectId = uuid();
+    state.projects.unshift({ id: state.activeProjectId, diagram: clone(documentModel) });
+  }
   state.document = clone(documentModel);
   state.past = [];
   state.future = [];
@@ -639,7 +688,24 @@ function replaceDocument(documentModel, message) {
   state.tool = "select";
   setStatus(message);
   renderAll();
-  scheduleAutosave();
+  persistProject();
+}
+
+function deleteProject(id) {
+  if (!state.projects.some((item) => item.id === id)) return;
+  clearTimeout(state.autosaveTimer);
+  const active = state.projects.find((item) => item.id === state.activeProjectId);
+  if (active) active.diagram = clone(state.document);
+  state.projects = state.projects.filter((item) => item.id !== id);
+  if (id === state.activeProjectId) {
+    state.document = null;
+    const next = state.projects[0];
+    replaceDocument(next?.diagram || blankDiagram(), "Diagram deleted", next?.id || null);
+  } else {
+    persistProject();
+    renderLists();
+    setStatus("Diagram deleted");
+  }
 }
 
 function undo() {
@@ -701,6 +767,7 @@ function setSnap(enabled) {
 
 function setTool(tool) {
   state.tool = tool;
+  state.selected = null;
   state.connectionStart = null;
   state.drag = null;
   setStatus(`${titleCase(tool === "vertex" ? "add vertex" : tool)} tool`);
@@ -720,8 +787,10 @@ function hintText() {
 }
 
 function renderLists() {
-  const templates = $("#templates");
-  templates.innerHTML = state.templates.map((documentModel, index) => `<button type="button" role="option" data-template="${index}" title="Load ${escapeXml(documentModel.title)}">${escapeXml(documentModel.title)}</button>`).join("");
+  $("#projects").innerHTML = state.projects.map((project) => {
+    const title = escapeXml(project.id === state.activeProjectId ? state.document.title : project.diagram.title);
+    return `<div class="project-row" role="listitem"><button type="button" data-project="${escapeXml(project.id)}" aria-current="${project.id === state.activeProjectId}" title="Open ${title}">${title}</button><button type="button" class="project-delete" data-delete-project="${escapeXml(project.id)}" aria-label="Delete ${title}" title="Delete ${title}">×</button></div>`;
+  }).join("");
   const objects = [];
   state.document.vertices.forEach((vertex, index) => {
     objects.push(`<button type="button" role="option" data-object="${escapeXml(vertex.id)}" aria-selected="${vertex.id === state.selected}" title="Vertex ${index + 1}${vertex.label ? ` · ${escapeXml(displayLabel(vertex.label))}` : ""}">Vertex ${index + 1}${vertex.label ? ` · ${htmlLabel(vertex.label)}` : ""}</button>`);
@@ -755,36 +824,28 @@ function choice(label, path, value, options) {
 }
 
 function renderInspector() {
-  const inspector = $("#inspector");
+  const inspector = $(".selection-section");
   const context = `${state.tool}:${state.selected || ""}`;
   const fineOpen = inspector.dataset.objectId === context && inspector.querySelector("details")?.open;
+  const scrollTop = inspector.dataset.objectId === context ? inspector.scrollTop : 0;
   const documentModel = state.document;
-  let html = '<h2>Inspector</h2><hr><h2>Figure style</h2>';
-  html += field("Figure width (mm)", "style.widthMm", niceNumber(documentModel.style.widthMm), { type: "number", min: 60, max: 240, step: 1 });
-  html += field("Line width (pt)", "style.strokePt", niceNumber(documentModel.style.strokePt), { type: "number", min: 0.3, max: 2, step: 0.1 });
-  html += field("Text size (pt)", "style.fontPt", niceNumber(documentModel.style.fontPt), { type: "number", min: 5, max: 18, step: 1 });
-  html += `<label class="check"><input data-setting="snap" type="checkbox"${state.snap ? " checked" : ""}> Snap to grid</label>`;
-  html += `<label class="check"><input data-setting="showGrid" type="checkbox"${state.showGrid ? " checked" : ""}> Show page grid</label>`;
-  if (state.tool === "connect" || state.tool === "loop") {
-    html += `<hr><h2>New ${state.tool === "connect" ? "propagator" : "loop"}</h2>`;
-    html += choice("Line type", "setting.newKind", state.newKind, KINDS);
-    if (state.tool === "loop") html += choice("Loop type", "setting.loopMode", state.loopMode, [{ value: "single", label: "Single vertex" }, { value: "double", label: "Two vertices" }]);
-  }
+  let html = "";
   const vertex = vertexById(state.selected);
   const edge = edgeById(state.selected);
   const annotation = annotationById(state.selected);
   if (vertex) {
-    html += '<hr><h2>Vertex</h2>';
+    html += '<h3>Vertex</h3>';
     html += field("Label (TeX)", "vertex.label", vertex.label, { maxlength: 200 });
     html += field("X position", "vertex.x", niceNumber(vertex.x), { type: "number", min: 20, max: 700, step: 1 });
     html += field("Y position", "vertex.y", niceNumber(vertex.y), { type: "number", min: 20, max: 460, step: 1 });
-    html += field("Label X", "vertex.labelX", niceNumber(vertex.labelX), { type: "number", min: -150, max: 150, step: 1 });
-    html += field("Label Y", "vertex.labelY", niceNumber(vertex.labelY), { type: "number", min: -150, max: 150, step: 1 });
+    const limits = labelLimits(vertex.label, vertex.x, vertex.y);
+    html += field("Label X", "vertex.labelX", niceNumber(vertex.labelX), { type: "number", min: Math.ceil(limits.minX), max: Math.floor(limits.maxX), step: 1 });
+    html += field("Label Y", "vertex.labelY", niceNumber(vertex.labelY), { type: "number", min: Math.ceil(limits.minY), max: Math.floor(limits.maxY), step: 1 });
     html += choice("Vertex style", "vertex.marker", vertex.marker, MARKERS);
     if (!['none', 'dot'].includes(vertex.marker)) html += field("Circle radius", "vertex.markerSize", niceNumber(vertex.markerSize), { type: "number", min: 6, max: 60, step: 1 });
     html += '<button type="button" class="danger" data-action="delete">Delete vertex</button>';
   } else if (edge) {
-    html += '<hr><h2>Propagator</h2>';
+    html += '<h3>Propagator</h3>';
     html += choice("Particle style", "edge.kind", edge.kind, KINDS);
     html += field("Label (TeX)", "edge.label", edge.label, { maxlength: 200 });
     html += choice("Arrow direction", "edge.arrow", edge.arrow, [{ value: "forward", label: "Start → end" }, { value: "reverse", label: "End → start" }, { value: "none", label: "No arrow" }]);
@@ -805,6 +866,10 @@ function renderInspector() {
     html += `<label class="check"><input data-path="edge.momentumEnabled" type="checkbox"${edge.momentum ? " checked" : ""}> Momentum arrow</label>`;
     if (edge.momentum) {
       html += field("Momentum label (TeX)", "momentum.label", edge.momentum.label, { maxlength: 200 });
+      const base = momentumLabelBase(edge);
+      const limits = labelLimits(edge.momentum.label, base.x, base.y);
+      html += field("Momentum label X", "momentum.labelX", niceNumber(edge.momentum.labelX ?? 0), { type: "number", min: Math.ceil(limits.minX), max: Math.floor(limits.maxX), step: 1 });
+      html += field("Momentum label Y", "momentum.labelY", niceNumber(edge.momentum.labelY ?? 0), { type: "number", min: Math.ceil(limits.minY), max: Math.floor(limits.maxY), step: 1 });
       html += choice("Momentum direction", "momentum.direction", edge.momentum.direction, [
         { value: "forward", label: "Start → end" }, { value: "reverse", label: "End → start" },
       ]);
@@ -816,7 +881,7 @@ function renderInspector() {
     }
     html += '<button type="button" class="danger" data-action="delete">Delete propagator</button>';
   } else if (annotation) {
-    html += `<hr><h2>${annotation.type === "label" ? "Free label" : "Free arrow"}</h2>`;
+    html += `<h3>${annotation.type === "label" ? "Free label" : "Free arrow"}</h3>`;
     if (annotation.type === "label") {
       html += field("Label (TeX)", "annotation.text", annotation.text, { maxlength: 200 });
       html += field("X position", "annotation.x", niceNumber(annotation.x), { type: "number", min: 0, max: 720, step: 1 });
@@ -826,8 +891,32 @@ function renderInspector() {
     html += `<label class="field">Color<input data-path="annotation.color" type="color" value="${escapeXml(annotation.color)}"></label>`;
     html += '<button type="button" class="danger" data-action="delete">Delete annotation</button>';
   }
-  inspector.innerHTML = html;
+  if (state.tool !== "select") {
+    html = `<p class="tool-note">${escapeXml(hintText())}</p>`;
+    if (state.tool === "vertex") {
+      html += choice("Vertex icon style", "setting.newMarker", state.newMarker, MARKERS);
+      if (!["none", "dot"].includes(state.newMarker)) html += field("Icon radius", "setting.newMarkerSize", state.newMarkerSize, { type: "number", min: 6, max: 60, step: 1 });
+    }
+    if (state.tool === "connect" || state.tool === "loop") {
+      html += choice("Line type", "setting.newKind", state.newKind, KINDS);
+      if (state.tool === "connect") html += choice("Arrow direction", "setting.newArrow", state.newArrow, [
+        { value: "auto", label: "Automatic" }, { value: "forward", label: "Start → end" }, { value: "reverse", label: "End → start" }, { value: "none", label: "No arrow" },
+      ]);
+      if (state.tool === "loop") html += choice("Loop type", "setting.loopMode", state.loopMode, [{ value: "single", label: "Single vertex" }, { value: "double", label: "Two vertices" }]);
+    }
+  }
+  if (state.tool === "select" && !html) html = '<p class="tool-note">Click a vertex or propagator on the page, or choose one from Objects, to edit it. Drag vertices and labels to move them.</p>';
+  inspector.querySelector("h2").textContent = { select: "Selection", vertex: "Add vertex", connect: "Connect vertices", loop: "Add loop", label: "Add free label", arrow: "Add free arrow" }[state.tool];
+  $("#selection-details").innerHTML = html;
   inspector.dataset.objectId = context;
+  inspector.scrollTop = scrollTop;
+  let figure = field("Figure width (mm)", "style.widthMm", niceNumber(documentModel.style.widthMm), { type: "number", min: 60, max: 240, step: 1 });
+  figure += field("Line width (pt)", "style.strokePt", niceNumber(documentModel.style.strokePt), { type: "number", min: 0.3, max: 2, step: 0.1 });
+  figure += field("Text size (pt)", "style.fontPt", niceNumber(documentModel.style.fontPt), { type: "number", min: 5, max: 18, step: 1 });
+  figure += `<label class="check"><input data-setting="snap" type="checkbox"${state.snap ? " checked" : ""}> Snap to grid</label>`;
+  figure += `<label class="check"><input data-setting="showGrid" type="checkbox"${state.showGrid ? " checked" : ""}> Show page grid</label>`;
+  $("#figure-details").innerHTML = figure;
+  $(".figure-section").hidden = !state.showFigurePanel;
   const fine = inspector.querySelector("details");
   if (fine) fine.open = fineOpen;
 }
@@ -845,6 +934,7 @@ function renderAll() {
   $$('[data-tool]').forEach((button) => button.classList.toggle("active", button.dataset.tool === state.tool));
   $("#menu-snap").checked = state.snap;
   $("#menu-grid").checked = state.showGrid;
+  $("#menu-figure-panel").checked = state.showFigurePanel;
   $("#menu-grid-size").value = String(state.gridSize);
   $("#menu-theme").value = state.theme;
 }
@@ -913,11 +1003,25 @@ function blankDiagram() {
   };
 }
 
-function openRenameDialog() {
+function openRenameDialog(projectId = state.activeProjectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  const dialog = $("#rename-dialog");
+  dialog.dataset.projectId = projectId;
   const input = $("#rename-input");
-  input.value = state.document.title;
-  $("#rename-dialog").showModal();
+  input.value = projectId === state.activeProjectId ? state.document.title : project.diagram.title;
+  dialog.showModal();
   requestAnimationFrame(() => { input.focus(); input.select(); });
+}
+
+function openFigureStyleDialog() {
+  const style = state.document.style;
+  $("#figure-width").value = niceNumber(style.widthMm);
+  $("#figure-stroke").value = niceNumber(style.strokePt);
+  $("#figure-font").value = niceNumber(style.fontPt);
+  $("#figure-snap").checked = state.snap;
+  $("#figure-grid").checked = state.showGrid;
+  $("#figure-style-dialog").showModal();
 }
 
 function updateExportOptions() {
@@ -1030,6 +1134,7 @@ function runAction(action) {
   else if (action === "redo") redo();
   else if (action === "delete") removeSelected();
   else if (action === "rename") openRenameDialog();
+  else if (action === "figure-style") openFigureStyleDialog();
   else if (action === "export") { updateExportOptions(); $("#export-dialog").showModal(); }
   else if (action === "latex") openLatexDialog();
   else if (action === "shutdown") stopServer();
@@ -1048,7 +1153,6 @@ function canvasPoint(event) {
 function beginConnection(vertex) {
   if (!state.connectionStart) {
     state.connectionStart = vertex.id;
-    state.selected = vertex.id;
     renderAll();
     return;
   }
@@ -1061,9 +1165,9 @@ function beginConnection(vertex) {
     return;
   }
   const newEdge = makeEdge(state.connectionStart, vertex.id, state.newKind);
+  if (state.newArrow !== "auto") newEdge.arrow = state.newArrow;
   const before = clone(state.document);
   state.document.edges.push(newEdge);
-  state.selected = newEdge.id;
   state.connectionStart = null;
   record(before, "Propagator added");
 }
@@ -1079,13 +1183,11 @@ function beginLoop(vertex) {
     newEdge.loopAngle = spaces.sort((a, b) => b[1] - a[1])[0][0];
     const before = clone(state.document);
     state.document.edges.push(newEdge);
-    state.selected = newEdge.id;
     record(before, "Loop added");
     return;
   }
   if (!state.connectionStart) {
     state.connectionStart = vertex.id;
-    state.selected = vertex.id;
     renderAll();
     return;
   }
@@ -1107,7 +1209,6 @@ function beginLoop(vertex) {
   if (state.newKind === "fermion") second.arrow = "reverse";
   const before = clone(state.document);
   state.document.edges.push(first, second);
-  state.selected = first.id;
   state.connectionStart = null;
   record(before, "Two-vertex loop added");
 }
@@ -1144,10 +1245,13 @@ function canvasDown(event) {
     const x = state.snap ? snapCoordinate(point.x, 20, 700) : clamp(point.x, 20, 700);
     const y = state.snap ? snapCoordinate(point.y, 20, 460) : clamp(point.y, 20, 460);
     const newVertex = makeVertex(x, y);
+    newVertex.marker = state.newMarker;
+    newVertex.visible = state.newMarker !== "none";
+    newVertex.markerSize = state.newMarkerSize;
     const before = clone(state.document);
     state.document.vertices.push(newVertex);
-    state.selected = newVertex.id;
     state.tool = "select";
+    state.selected = newVertex.id;
     record(before, "Vertex added");
     return;
   }
@@ -1195,8 +1299,17 @@ function canvasMove(event) {
   } else if (drag.kind === "vertex-label") {
     const vertex = vertexById(drag.id);
     if (vertex) {
-      vertex.labelX = clamp(vertex.labelX + dx, -150, 150);
-      vertex.labelY = clamp(vertex.labelY + dy, -150, 150);
+      const limits = labelLimits(vertex.label, vertex.x, vertex.y);
+      vertex.labelX = clamp(vertex.labelX + dx, limits.minX, limits.maxX);
+      vertex.labelY = clamp(vertex.labelY + dy, limits.minY, limits.maxY);
+    }
+  } else if (drag.kind === "momentum-label") {
+    const edge = edgeById(drag.id);
+    if (edge?.momentum) {
+      const base = momentumLabelBase(edge);
+      const limits = labelLimits(edge.momentum.label, base.x, base.y);
+      edge.momentum.labelX = clamp((edge.momentum.labelX ?? 0) + dx, limits.minX, limits.maxX);
+      edge.momentum.labelY = clamp((edge.momentum.labelY ?? 0) + dy, limits.minY, limits.maxY);
     }
   } else if (drag.kind === "edge-label") {
     const edge = edgeById(drag.id);
@@ -1248,6 +1361,9 @@ function inspectorChanged(input) {
     setStatus(`New line type: ${titleCase(state.newKind)}`);
     return;
   }
+  if (path === "setting.newArrow") { state.newArrow = input.value; return; }
+  if (path === "setting.newMarker") { state.newMarker = input.value; renderInspector(); return; }
+  if (path === "setting.newMarkerSize") { state.newMarkerSize = clamp(Number(input.value) || 22, 6, 60); input.value = String(state.newMarkerSize); return; }
   if (path === "setting.loopMode") {
     state.loopMode = input.value;
     state.connectionStart = null;
@@ -1284,7 +1400,7 @@ function inspectorChanged(input) {
 }
 
 function applyTheme(theme) {
-  state.theme = ["automatic", "light", "dark"].includes(theme) ? theme : "automatic";
+  state.theme = ["automatic", "light", "dark"].includes(theme) ? theme : "dark";
   document.body.dataset.theme = state.theme;
   persistSettings();
 }
@@ -1295,8 +1411,23 @@ function bindEvents() {
     if (action) { runAction(action.dataset.action); return; }
     const tool = event.target.closest("[data-tool]");
     if (tool) { closeMenus(); $(".annotation-tools")?.removeAttribute("open"); setTool(tool.dataset.tool); return; }
-    const template = event.target.closest("[data-template]");
-    if (template) { replaceDocument(state.templates[Number(template.dataset.template)], "Template loaded"); return; }
+    const projectDelete = event.target.closest("[data-delete-project]");
+    if (projectDelete) {
+      const project = state.projects.find((item) => item.id === projectDelete.dataset.deleteProject);
+      if (project) {
+        $("#delete-project-dialog").dataset.projectId = project.id;
+        $("#delete-project-name").textContent = project.id === state.activeProjectId ? state.document.title : project.diagram.title;
+        $("#delete-project-dialog").showModal();
+      }
+      return;
+    }
+    const project = event.target.closest("[data-project]");
+    if (project) {
+      if (event.detail >= 2) { openRenameDialog(project.dataset.project); return; }
+      const selected = state.projects.find((item) => item.id === project.dataset.project);
+      if (selected && selected.id !== state.activeProjectId) replaceDocument(selected.diagram, "Diagram opened", selected.id);
+      return;
+    }
     const object = event.target.closest("[data-object]");
     if (object) {
       state.selected = object.dataset.object;
@@ -1323,6 +1454,14 @@ function bindEvents() {
     persistSettings();
     renderAll();
   });
+  $("#menu-figure-panel").addEventListener("change", (event) => {
+    state.showFigurePanel = event.target.checked; persistSettings(); renderAll();
+  });
+  $("#menu-template").addEventListener("change", (event) => {
+    const index = Number(event.target.value);
+    if (event.target.value !== "" && state.templates[index]) replaceDocument(state.templates[index], "Starting point loaded");
+    event.target.value = ""; closeMenus();
+  });
   $("#menu-grid-size").addEventListener("change", (event) => {
     state.gridSize = Number(event.target.value);
     persistSettings();
@@ -1334,15 +1473,37 @@ function bindEvents() {
   $("#latex-format").addEventListener("change", refreshLatex);
   $("#copy-latex").addEventListener("click", () => copyText(state.latexSource, "LaTeX copied"));
   $("#copy-standalone").addEventListener("click", () => copyText(state.standaloneSource, "Test document copied"));
-  $("#diagram-title").addEventListener("dblclick", openRenameDialog);
+  $("#diagram-title").addEventListener("click", () => openRenameDialog());
 
   $("#rename-form").addEventListener("submit", (event) => {
     if (event.submitter?.value !== "default") return;
     event.preventDefault();
     const title = $("#rename-input").value.trim();
     if (!title) { notify("The diagram title cannot be empty."); return; }
-    commit((documentModel) => { documentModel.title = title; }, "Diagram renamed");
+    const projectId = $("#rename-dialog").dataset.projectId;
+    if (projectId === state.activeProjectId) commit((documentModel) => { documentModel.title = title; }, "Diagram renamed");
+    else {
+      const project = state.projects.find((item) => item.id === projectId);
+      if (project) { project.diagram.title = title; persistProject(); renderLists(); }
+    }
     $("#rename-dialog").close();
+  });
+  $("#figure-style-form").addEventListener("submit", (event) => {
+    if (event.submitter?.value !== "apply") return;
+    event.preventDefault();
+    const before = clone(state.document);
+    state.document.style = { widthMm: Number($("#figure-width").value), strokePt: Number($("#figure-stroke").value), fontPt: Number($("#figure-font").value) };
+    if ($("#figure-snap").checked && !state.snap) for (const vertex of state.document.vertices) {
+      vertex.x = snapCoordinate(vertex.x, 20, 700); vertex.y = snapCoordinate(vertex.y, 20, 460);
+    }
+    state.snap = $("#figure-snap").checked;
+    state.showGrid = $("#figure-grid").checked;
+    persistSettings(); record(before, "Figure style updated"); renderAll();
+    $("#figure-style-dialog").close();
+  });
+  $("#delete-project-form").addEventListener("submit", (event) => {
+    if (event.submitter?.value !== "delete") return;
+    event.preventDefault(); deleteProject($("#delete-project-dialog").dataset.projectId); $("#delete-project-dialog").close();
   });
   $("#export-form").addEventListener("submit", (event) => {
     if (event.submitter?.value !== "default") return;
@@ -1419,6 +1580,7 @@ function loadSettings() {
     const settings = JSON.parse(localStorage.getItem(SETTINGS_STORE) || "{}");
     if (typeof settings.snap === "boolean") state.snap = settings.snap;
     if (typeof settings.showGrid === "boolean") state.showGrid = settings.showGrid;
+    if (typeof settings.showFigurePanel === "boolean") state.showFigurePanel = settings.showFigurePanel;
     if ([10, 20, 40].includes(settings.gridSize)) state.gridSize = settings.gridSize;
     if (["automatic", "light", "dark"].includes(settings.theme)) state.theme = settings.theme;
     if (Number.isFinite(settings.libraryWidth)) state.libraryWidth = settings.libraryWidth;
@@ -1432,16 +1594,36 @@ function loadSettings() {
 
 async function restoreDocument(fallback) {
   try {
+    const saved = JSON.parse(localStorage.getItem(PROJECTS_STORE) || "null");
+    if (saved) {
+      if (!Array.isArray(saved.projects) || !saved.projects.length) throw Error("Invalid project list.");
+      const projects = [];
+      for (const item of saved.projects) {
+        if (typeof item.id !== "string" || !item.id) throw Error("Invalid project ID.");
+        const response = await api("/api/validate", { diagram: item.diagram });
+        projects.push({ id: item.id, diagram: (await response.json()).diagram });
+      }
+      if (new Set(projects.map((item) => item.id)).size !== projects.length) throw Error("Duplicate project ID.");
+      const active = projects.find((item) => item.id === saved.activeId);
+      if (!active) throw Error("Missing active project.");
+      state.projects = projects;
+      state.activeProjectId = active.id;
+      setStatus("Recovered browser projects");
+      return clone(active.diagram);
+    }
+  } catch (_error) { notify("The browser project list could not be restored. Trying the previous autosave."); }
+  let documentModel = fallback;
+  try {
     const saved = localStorage.getItem(STORE);
-    if (!saved) return fallback;
-    const response = await api("/api/validate", { diagram: JSON.parse(saved) });
-    const result = await response.json();
-    setStatus("Recovered browser autosave");
-    return result.diagram;
-  } catch (_error) {
-    notify("The previous browser draft could not be restored. A starting template was loaded instead.");
-    return fallback;
-  }
+    if (saved) {
+      const response = await api("/api/validate", { diagram: JSON.parse(saved) });
+      documentModel = (await response.json()).diagram;
+      setStatus("Recovered browser autosave");
+    }
+  } catch (_error) { notify("The previous browser draft could not be restored. A starting template was loaded instead."); }
+  state.activeProjectId = uuid();
+  state.projects = [{ id: state.activeProjectId, diagram: clone(documentModel) }];
+  return documentModel;
 }
 
 async function initialize() {
@@ -1454,11 +1636,13 @@ async function initialize() {
     state.token = bootstrap.token;
     state.version = bootstrap.version;
     state.templates = bootstrap.templates;
+    $("#menu-template").innerHTML += state.templates.map((item, index) => `<option value="${index}">${escapeXml(item.title)}</option>`).join("");
     state.latexFormats = bootstrap.latexFormats;
     $("#version").textContent = `Version ${bootstrap.version} · Browser edition`;
     $("#latex-format").innerHTML = bootstrap.latexFormats.map((option) => `<option value="${escapeXml(option.value)}">${escapeXml(option.label)}</option>`).join("");
     state.document = await restoreDocument(clone(state.templates[0]));
     renderAll();
+    persistProject();
     $("#app").setAttribute("aria-busy", "false");
   } catch (error) {
     notify(error.message);

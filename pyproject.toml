@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "feynman-diagram-studio"
-version = "0.2.0"
+version = "1.0"
 description = "A lightweight desktop and browser editor for publication-ready Feynman diagrams"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Feynman Diagram Studio contributors" }]
 dependencies = ["Pillow>=10.0,<13", "reportlab>=4.2,<6"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
@@ -34,7 +34,7 @@ dev = ["pytest>=8", "pyinstaller>=6"]
 include = ["feynman_studio*"]
 
 [tool.setuptools.package-data]
-feynman_studio = ["assets/*.png", "web/*"]
+feynman_studio = ["assets/*.png", "web/*", "templates.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

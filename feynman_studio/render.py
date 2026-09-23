@@ -72,6 +72,7 @@ _TEX_WORDS = {
     "sigma": "σ",
     "tau": "τ",
     "phi": "φ",
+    "varphi": "ϕ",
     "chi": "χ",
     "psi": "ψ",
     "omega": "ω",

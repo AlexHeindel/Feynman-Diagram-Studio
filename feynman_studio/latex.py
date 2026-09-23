@@ -142,6 +142,9 @@ def _tikz(document: Diagram, package: str) -> str:
 
 def _fmf(document: Diagram, package: str) -> str:
     graph = "fmfgraph*"
+    vertex_names = {vertex.id: "fdsv{}".format(index) for index, vertex in enumerate(document.vertices)}
+    def label_text(source: str) -> str:
+        return source.replace(",", r"\mathpunct{\char44}")
     width_pt = document.style.widthMm * 72.27 / 25.4
     exact_positions = bool(document.annotations or any(edge.momentum for edge in document.edges))
     lines = [
@@ -156,14 +159,14 @@ def _fmf(document: Diagram, package: str) -> str:
     for vertex in document.vertices:
         x = "%.6f" % (vertex.x / WIDTH) if exact_positions else _n(vertex.x / WIDTH)
         y = "%.6f" % (1 - vertex.y / HEIGHT) if exact_positions else _n(1 - vertex.y / HEIGHT)
-        lines.append("  \\fmfforce{(%sw,%sh)}{%s}" % (x, y, vertex.id))
+        lines.append("  \\fmfforce{(%sw,%sh)}{%s}" % (x, y, vertex_names[vertex.id]))
         marker = vertex.marker if vertex.marker else ("dot" if vertex.visible else "none")
         if marker != "none":
             filling = {"dot": "full", "filled": "full", "open": "empty",
                        "hatched": "shaded", "crosshatched": "hatched", "dotted": "gray10"}[marker]
             # Bare sizes are interpreted differently by MetaPost and METAFONT.
             diameter_pt = 4 if marker == "dot" else 2 * vertex.markerSize * width_pt / WIDTH
-            lines.append("  \\fmfv{decor.shape=circle,decor.filled=%s,decor.size=%spt}{%s}" % (filling, _n(diameter_pt), vertex.id))
+            lines.append("  \\fmfv{decor.shape=circle,decor.filled=%s,decor.size=%spt}{%s}" % (filling, _n(diameter_pt), vertex_names[vertex.id]))
     styles = {"fermion": ("plain", "fermion"), "photon": ("photon", "photon"),
               "gluon": ("gluon", "gluon"), "scalar": ("dashes", "scalar"), "ghost": ("dots", "ghost")}
     for edge in document.edges:
@@ -181,7 +184,7 @@ def _fmf(document: Diagram, package: str) -> str:
             r, g, b = _rgb(edge.color)
             options.append("foreground=(%.3f*red+%.3f*green+%.3f*blue)" % (r, g, b))
         for _ in bundle_offsets(edge):
-            lines.append("  \\fmf{%s}{%s,%s}" % (", ".join(options), edge.to if reverse else edge.from_, edge.from_ if reverse else edge.to))
+            lines.append("  \\fmf{%s}{%s,%s}" % (", ".join(options), vertex_names[edge.to if reverse else edge.from_], vertex_names[edge.from_ if reverse else edge.to]))
     if any(edge.label or edge.momentum or (edge.arrow != "none" and edge.kind in ("photon", "gluon")) for edge in document.edges) or any(vertex.label for vertex in document.vertices) or document.annotations:
         lines.append("  \\fmffreeze")
     def coordinate(point):
@@ -217,7 +220,7 @@ def _fmf(document: Diagram, package: str) -> str:
         if edge.label and start and end:
             _, middle = geometry(start, end, edge)
             x, y = edge_label_position(middle, edge)
-            lines.append("  \\fmfiv{l=$%s$,l.a=0,l.d=0}{(%.6fw,%.6fh)}" % (edge.label, x / WIDTH, 1 - y / HEIGHT))
+            lines.append("  \\fmfiv{l={$%s$},l.a=0,l.d=0}{(%.6fw,%.6fh)}" % (label_text(edge.label), x / WIDTH, 1 - y / HEIGHT))
     for edge in document.edges:
         if not edge.momentum:
             continue
@@ -232,11 +235,11 @@ def _fmf(document: Diagram, package: str) -> str:
         base = ((arrow[1][0] + arrow[2][0]) / 2, (arrow[1][1] + arrow[2][1]) / 2)
         lines.append("  \\fmfi{phantom_arrow%s}{%s--%s}" % (ink, coordinate(base), coordinate(tip)))
         if edge.momentum.label:
-            lines.append("  \\fmfiv{l={\\color[HTML]{%s}$%s$},l.a=0,l.d=0}{%s}" % (edge.momentum.color[1:], edge.momentum.label, coordinate(label)))
+            lines.append("  \\fmfiv{l={\\color[HTML]{%s}$%s$},l.a=0,l.d=0}{%s}" % (edge.momentum.color[1:], label_text(edge.momentum.label), coordinate(label)))
     for item in document.annotations:
         if isinstance(item, FreeLabel):
             if item.text:
-                lines.append("  \\fmfiv{l={\\color[HTML]{%s}$%s$},l.a=0,l.d=0}{%s}" % (item.color[1:], item.text, coordinate((item.x, item.y))))
+                lines.append("  \\fmfiv{l={\\color[HTML]{%s}$%s$},l.a=0,l.d=0}{%s}" % (item.color[1:], label_text(item.text), coordinate((item.x, item.y))))
         else:
             ink = foreground(item.color)
             lines.append("  \\fmfi{plain%s}{%s--%s}" % (ink, coordinate((item.x1, item.y1)), coordinate((item.x2, item.y2))))
@@ -245,7 +248,7 @@ def _fmf(document: Diagram, package: str) -> str:
             lines.append("  \\fmfi{phantom_arrow%s}{%s--%s}" % (ink, coordinate((item.x2 - dx / length * 12, item.y2 - dy / length * 12)), coordinate((item.x2, item.y2))))
     for vertex in document.vertices:
         if vertex.label:
-            lines.append("  \\fmfiv{l=$%s$,l.a=0,l.d=0}{(%.6fw,%.6fh)}" % (vertex.label, (vertex.x + vertex.labelX) / WIDTH, 1 - (vertex.y + vertex.labelY) / HEIGHT))
+            lines.append("  \\fmfiv{l={$%s$},l.a=0,l.d=0}{(%.6fw,%.6fh)}" % (label_text(vertex.label), (vertex.x + vertex.labelX) / WIDTH, 1 - (vertex.y + vertex.labelY) / HEIGHT))
     lines.extend(("\\end{%s}" % graph, "\\end{fmffile}", "\\endgroup"))
     return "\n".join(lines)
 

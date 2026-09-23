@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Feynman Diagram Studio">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#192D48"/>
+      <stop offset="1" stop-color="#0B1526"/>
+    </linearGradient>
+    <linearGradient id="photon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#80F0E2"/>
+      <stop offset="1" stop-color="#63BBFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#bg)"/>
+  <rect x="35" y="35" width="954" height="954" rx="221" fill="none" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="6"/>
+  <g fill="none" stroke="#E7F0F8" stroke-width="25" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M170 278 334 512 170 746 M854 278 690 512 854 746"/>
+  </g>
+  <path d="M356 512 C374 476 392 476 410 512 S446 548 464 512 S500 476 518 512 S554 548 572 512 S608 476 626 512 S652 548 668 512" fill="none" stroke="url(#photon)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="334" cy="512" r="26" fill="#14253C" stroke="#E7F0F8" stroke-width="18"/>
+  <circle cx="690" cy="512" r="26" fill="#102039" stroke="#E7F0F8" stroke-width="18"/>
+</svg>

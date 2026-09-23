@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from feynman_studio.latex import latex_source
-from feynman_studio.model import templates
+from feynman_studio.model import Diagram, templates
 from feynman_studio.web import _create_server, create_server
 
 
@@ -43,17 +43,19 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Feynman Diagram Studio Web", body)
+        self.assertIn(b'href="/favicon.svg"', body)
+        self.assertIn(b'src="/midnight-mark.svg"', body)
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
         self.assertEqual(headers["Cache-Control"], "no-store")
 
         status, _headers, body = self.request("GET", "/api/bootstrap")
         self.assertEqual(status, 200)
         bootstrap = json.loads(body)
-        self.assertEqual(len(bootstrap["templates"]), 10)
+        self.assertEqual(len(bootstrap["templates"]), 13)
         self.assertEqual(len(bootstrap["latexFormats"]), 6)
         self.assertEqual(bootstrap["token"], self.server.token)
 
-        for path, marker in (("/app.css", b".workspace"), ("/app.js", b"renderCanvas")):
+        for path, marker in (("/app.css", b".workspace"), ("/app.js", b"renderCanvas"), ("/favicon.svg", b"<svg"), ("/midnight-mark.svg", b"<svg"), ("/DejaVuSerif.woff2", b"wOF2")):
             status, _headers, body = self.request("GET", path)
             self.assertEqual(status, 200)
             self.assertIn(marker, body)
@@ -68,7 +70,7 @@ class WebAppTests(unittest.TestCase):
 
         status, _headers, body = self.request("POST", "/api/validate", {"diagram": document})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)["diagram"], document)
+        self.assertEqual(json.loads(body)["diagram"], Diagram.from_dict(document).to_dict())
 
         invalid = dict(document)
         invalid["version"] = 99
@@ -92,7 +94,7 @@ class WebAppTests(unittest.TestCase):
         document = json.loads((Path(__file__).parent / "fixtures" / "annotations-v2.json").read_text())
         status, _headers, body = self.request("POST", "/api/validate", {"diagram": document})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)["diagram"], document)
+        self.assertEqual(json.loads(body)["diagram"], Diagram.from_dict(document).to_dict())
         for format_name in ("tikz-feynman", "tikz-feynhand", "feynmp", "feynmf", "pst-feyn", "axodraw2"):
             status, _headers, body = self.request("POST", "/api/latex", {"diagram": document, "format": format_name})
             self.assertEqual(status, 200, format_name + ": " + body.decode()[:120])

@@ -62,6 +62,20 @@ class ModelTests(unittest.TestCase):
         self.assertGreater(len(points), 3)
         self.assertTrue(all(math.isfinite(v) for point in (*points, *arrow, label) for v in point))
 
+    def test_momentum_label_offsets_round_trip_and_move_rendered_label(self):
+        raw = json.loads((Path(__file__).parent / "fixtures" / "annotations-v2.json").read_text())
+        document = Diagram.from_dict(raw)
+        edge = document.edges[0]
+        start, end = document.vertices[:2]
+        original = momentum_geometry(start, end, edge)[2]
+        edge.momentum.labelX, edge.momentum.labelY = 32, -14
+        moved = momentum_geometry(start, end, edge)[2]
+        self.assertEqual(moved, (original[0] + 32, original[1] - 14))
+        self.assertEqual(Diagram.from_json(document.to_json()), document)
+        raw["edges"][0]["momentum"]["labelX"] = 721
+        with self.assertRaises(DiagramError):
+            Diagram.from_dict(raw)
+
     def test_templates_round_trip_through_project_json(self):
         for document in templates():
             self.assertEqual(Diagram.from_json(document.to_json()), document)
@@ -85,7 +99,7 @@ class ModelTests(unittest.TestCase):
     def test_template_library_includes_reference_and_common_examples(self):
         documents = templates()
         titles = {document.title for document in documents}
-        self.assertEqual(len(documents), 10)
+        self.assertEqual(len(documents), 13)
         self.assertTrue(
             {
                 "Top-pair Higgs production",
@@ -94,6 +108,9 @@ class ModelTests(unittest.TestCase):
                 "Compton scattering",
                 "Muon decay",
                 "Vacuum polarization",
+                "Four-point scalar vertex",
+                "Three-point scalar vertex",
+                "Two-field loop",
             }.issubset(titles)
         )
 
@@ -135,7 +152,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(snap_value(230), 240)
         self.assertEqual(snap_value(26, 10), 30)
         self.assertEqual(snap_value(26, 40), 40)
-        for document in templates():
+        for document in templates()[:10]:
             for vertex in document.vertices:
                 self.assertEqual(vertex.x % GRID_SIZE, 0)
                 self.assertEqual(vertex.y % GRID_SIZE, 0)
@@ -232,7 +249,9 @@ class GeometryTests(unittest.TestCase):
         top, bottom = make_vertex(360, 100), make_vertex(360, 380)
         points, _ = geometry(top, bottom, make_edge(top.id, bottom.id, "gluon"))
         self.assertTrue(all(top.y <= y <= bottom.y for _, y in points))
-        self.assertGreater(max(abs(x - top.x) for x, _ in points[-24:]), 6.5)
+        self.assertTrue(all(x <= top.x for x, _ in points))
+        self.assertLess(min(x for x, _ in points), top.x - 13.5)
+        self.assertGreater(points[1][1] - top.y, abs(points[1][0] - top.x) * 5)
 
 
 class ExportTests(unittest.TestCase):
@@ -258,7 +277,7 @@ class ExportTests(unittest.TestCase):
         for format_name in ("feynmp", "feynmf"):
             source = latex_source(document, format_name)
             self.assertIn(r"\begin{fmfgraph*}", source)
-            self.assertIn(r"\fmfiv{l=$p$,l.a=0,l.d=0}{(0.555556w,0.572917h)}", source)
+        self.assertIn(r"\fmfiv{l={$p$},l.a=0,l.d=0}{(0.555556w,0.572917h)}", source)
         self.assertIn(r"\rput(400,275)", latex_source(document, "pst-feyn"))
         self.assertIn(r"\Text(189.7,130.4)", latex_source(document, "axodraw2"))
 

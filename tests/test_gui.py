@@ -13,6 +13,74 @@ from feynman_studio.model import KINDS, Momentum, blank_diagram, make_edge, make
 
 
 class GuiSmokeTests(unittest.TestCase):
+    def test_vertex_tool_switches_to_select_and_new_style_settings_apply(self):
+        app = StudioApp.__new__(StudioApp)
+        app.document = blank_diagram()
+        app.past, app.future = [], []
+        app.selected = app.connection_start = None
+        app.tool = "vertex"
+        app.new_marker, app.new_marker_size = "hatched", 30
+        app.new_kind, app.new_arrow = "fermion", "reverse"
+        app.snap = SimpleNamespace(get=lambda: False)
+        app.grid_size = SimpleNamespace(get=lambda: 20)
+        app.canvas_scale, app.canvas_offset = 1, (0, 0)
+        app.status = SimpleNamespace(set=lambda _value: None)
+        app._changed = app.redraw = app._update_tool_buttons = lambda: None
+        point = lambda x, y: SimpleNamespace(x=x, y=y)
+        app._canvas_down(point(100, 100))
+        self.assertEqual(app.tool, "select")
+        self.assertEqual(app.selected, app.document.vertices[0].id)
+        app.tool = "vertex"
+        app._canvas_down(point(200, 100))
+        self.assertEqual(app.tool, "select")
+        self.assertEqual(app.selected, app.document.vertices[1].id)
+        self.assertEqual([(item.marker, item.markerSize) for item in app.document.vertices],
+                         [("hatched", 30), ("hatched", 30)])
+        app.tool = "connect"
+        app.selected = None
+        app._canvas_down(point(100, 100))
+        app._canvas_down(point(200, 100))
+        self.assertEqual(app.document.edges[0].arrow, "reverse")
+        self.assertIsNone(app.selected)
+
+    def test_local_project_list_restores_and_falls_back_to_latest_draft(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "autosave.json"
+            first, second = blank_diagram(), blank_diagram()
+            first.title, second.title = "First", "Second"
+            app = StudioApp.__new__(StudioApp)
+            app.document = second
+            app.projects = [{"id": "first", "diagram": first, "path": None},
+                            {"id": "second", "diagram": second, "path": None}]
+            app.active_project_id = "second"
+            app.current_path = None
+            app.status = SimpleNamespace(set=lambda _value: None)
+            app._autosave_path = lambda: path
+            app._autosave()
+
+            def restored_app():
+                restored = StudioApp.__new__(StudioApp)
+                restored.document = blank_diagram()
+                restored.projects = [{"id": "initial", "diagram": restored.document, "path": None}]
+                restored.active_project_id = "initial"
+                restored.current_path = None
+                restored.snap = SimpleNamespace(get=lambda: False)
+                restored.status = SimpleNamespace(set=lambda _value: None)
+                restored.title_label = SimpleNamespace(configure=lambda **_values: None)
+                restored._autosave_path = lambda: path
+                restored._rebuild_project_list = lambda: None
+                restored._rebuild_inspector = lambda: None
+                return restored
+
+            restored = restored_app()
+            restored._restore_autosave()
+            self.assertEqual([item["diagram"].title for item in restored.projects], ["First", "Second"])
+            self.assertEqual(restored.document.title, "Second")
+            path.with_name("projects.json").write_text("{broken", encoding="utf-8")
+            fallback = restored_app()
+            fallback._restore_autosave()
+            self.assertEqual(fallback.document.title, "Second")
+
     def test_obsolete_tk_has_an_actionable_error(self):
         with self.assertRaisesRegex(RuntimeError, r"Tk 8\.6.*\/usr\/bin\/python3"):
             check_tk_version(8.5)
@@ -50,13 +118,15 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIs(app.menu_bar.master, app.file_controls.master)
             self.assertEqual(root.pack_slaves()[:2], [app.menu_bar.master, app.library.master])
             self.assertEqual(app.library.master.winfo_y(), app.menu_bar.master.winfo_y() + app.menu_bar.master.winfo_height())
-            app.menu_buttons["View"].invoke()
-            app.visible_menus["View"].unpost()
+            self.assertEqual(app.menu_buttons["View"].cget("text"), "View")
             self.assertEqual(app.theme_mode.get(), "automatic")
             self.assertEqual(app.grid_size.get(), 20)
             labels = [button.cget("text") for button in app.tool_buttons.values()]
             self.assertEqual(labels, ["Select", "Vertex", "Connect", "Loop"])
             self.assertTrue(all(button.master is app.diagram_tools for button in app.tool_buttons.values()))
+            annotate = next(widget for widget in app.diagram_tools.winfo_children() if isinstance(widget, ttk.Menubutton))
+            self.assertEqual(annotate.cget("style"), "Tool.TMenubutton")
+            self.assertEqual(app.style.lookup("Tool.TMenubutton", "borderwidth"), 1)
             self.assertEqual(app.open_button.cget("text"), "Open")
             self.assertEqual(app.open_button.grid_info()["row"], 0)
             self.assertEqual(app.save_button.grid_info()["row"], 0)
@@ -67,36 +137,108 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(app.undo_button.winfo_width(), app.redo_button.winfo_width())
             new_button = next(widget for widget in app.library.pack_slaves()
                               if isinstance(widget, ttk.Button) and widget.cget("text") == "＋ New blank diagram")
-            starting_points = next(widget for widget in app.library.pack_slaves()
-                                   if isinstance(widget, ttk.Label) and widget.cget("text") == "STARTING POINTS")
-            self.assertLess(new_button.winfo_y(), starting_points.winfo_y())
+            projects_heading = next(widget for widget in app.library.pack_slaves()
+                                    if isinstance(widget, ttk.Label) and widget.cget("text") == "MY DIAGRAMS")
+            self.assertLess(new_button.winfo_y(), projects_heading.winfo_y())
             root.geometry("960x640")
             root.update()
             self.assertEqual(app.undo_button.winfo_width(), app.redo_button.winfo_width())
             self.assertLessEqual(app.menu_bar.winfo_x() + app.menu_bar.winfo_width(), app.file_controls.winfo_x())
             self.assertLess(app.menu_bar.winfo_y(), app.file_controls.winfo_y() + app.file_controls.winfo_height())
             self.assertLess(app.file_controls.winfo_y(), app.menu_bar.winfo_y() + app.menu_bar.winfo_height())
-            self.assertIs(app.object_list.master, app.library)
+            self.assertIs(app.object_list.master, app.object_host)
+            self.assertIs(app.object_scrollbar.master, app.object_host)
+            self.assertGreaterEqual(app.object_scrollbar.winfo_width(), 10)
             self.assertEqual(app.object_list.size(), len(app.document.vertices) + len(app.document.edges))
-            self.assertEqual(app.template_list.size(), 10)
+            self.assertEqual(app.project_list.size(), 1)
+            self.assertFalse(app.show_figure_panel.get())
+            app.show_figure_panel.set(True)
+            app._rebuild_inspector()
+            self.assertIn("Figure style", [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)])
+            app.show_figure_panel.set(False)
+            app._rebuild_inspector()
             self.assertIsNotNone(app.canvas_preview)
             self.assertGreaterEqual(len(app.canvas.find_all()), len(app.document.vertices) + 2)
             for object_id in (app.document.vertices[0].id, app.document.edges[0].id):
                 app.selected = object_id
                 app._rebuild_inspector()
                 labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
-                self.assertEqual(labels[:2], ["Inspector", "Figure style"])
+                self.assertIn(labels[0], ("Selection",))
             edge = app.document.edges[0]
             edge.momentum = Momentum()
+            app.show_figure_panel.set(True)
             app._rebuild_inspector()
+            root.update()
+            scrollbar = next(widget for widget in app.inspector_canvas.master.winfo_children()
+                             if isinstance(widget, ttk.Scrollbar))
+            self.assertTrue(scrollbar.winfo_ismapped())
+            self.assertGreaterEqual(scrollbar.winfo_width(), 10)
             fine_button = next(widget for widget in app.inspector.winfo_children()
                                if isinstance(widget, ttk.Button) and widget.cget("text") == "Fine placement…")
             fine_button.invoke()
+            root.update()
             self.assertTrue(app._fine_placement_frame.winfo_manager())
+            delete_button = next(widget for widget in app.inspector.winfo_children()
+                                 if isinstance(widget, ttk.Button) and widget.cget("text") == "Delete propagator")
+            self.assertLess(fine_button.winfo_y(), app._fine_placement_frame.winfo_y())
+            self.assertLess(app._fine_placement_frame.winfo_y(), delete_button.winfo_y())
+            app.inspector_canvas.yview_moveto(0.5)
+            root.update()
+            scroll_before = app.inspector_canvas.canvasy(0)
             app._set_momentum_fraction(edge.id, "start", 25)
+            root.update()
+            self.assertAlmostEqual(app.inspector_canvas.canvasy(0), scroll_before, delta=2)
             self.assertTrue(app._fine_placement_frame.winfo_manager())
             app._set_momentum_fraction(edge.id, "end", 75)
+            root.update()
             self.assertTrue(app._fine_placement_frame.winfo_manager())
+            app.inspector_canvas.yview_moveto(0.5)
+            root.update()
+            start_entry = next(widget for widget in app._fine_placement_frame.winfo_children()
+                               if isinstance(widget, ttk.Entry))
+            start_entry.focus_force()
+            root.update()
+            scroll_before = app.inspector_canvas.canvasy(0)
+            start_entry.delete(0, "end")
+            start_entry.insert(0, "30")
+            start_entry.event_generate("<Return>")
+            root.update()
+            self.assertAlmostEqual(app.document.edge(edge.id).momentum.start, 0.3)
+            self.assertAlmostEqual(app.inspector_canvas.canvasy(0), scroll_before, delta=2)
+            app.inspector_canvas.yview_moveto(0)
+            root.update()
+            app.object_list.event_generate("<MouseWheel>", delta=-120,
+                                           rootx=app.inspector_canvas.winfo_rootx() + 20,
+                                           rooty=app.inspector_canvas.winfo_rooty() + 20)
+            root.update()
+            self.assertGreater(app.inspector_canvas.yview()[0], 0)
+            app.inspector_canvas.yview_moveto(0)
+            root.update()
+            app.project_list.event_generate("<MouseWheel>", delta=-120,
+                                            rootx=app.inspector_canvas.winfo_rootx() + 20,
+                                            rooty=app.inspector_canvas.winfo_rooty() + 20)
+            root.update()
+            self.assertGreater(app.inspector_canvas.yview()[0], 0)
+            app.inspector_canvas.yview_moveto(0)
+            root.update()
+            root.event_generate("<MouseWheel>", delta=-120,
+                                rootx=app.inspector_canvas.winfo_rootx() + 20,
+                                rooty=app.inspector_canvas.winfo_rooty() + 20)
+            root.update()
+            self.assertGreater(app.inspector_canvas.yview()[0], 0)
+            if tk.TkVersion >= 9:
+                app.inspector_canvas.yview_moveto(0)
+                root.update()
+                heading = next(widget for widget in app.inspector.winfo_children()
+                               if isinstance(widget, ttk.Label) and widget.cget("text") == "Selection")
+                heading.event_generate("<TouchpadScroll>", delta=(-40 & 0xFFFF),
+                                       rootx=0, rooty=0)
+                root.update()
+                self.assertGreater(app.inspector_canvas.yview()[0], 0)
+                heading.event_generate("<TouchpadScroll>", delta=40,
+                                       rootx=0, rooty=0)
+                root.update()
+                self.assertAlmostEqual(app.inspector_canvas.yview()[0], 0)
             app.selected = None
             app.set_tool("connect")
             self.assertEqual(app.tool, "connect")
@@ -106,6 +248,13 @@ class GuiSmokeTests(unittest.TestCase):
             app.theme_mode.set("dark")
             app._apply_theme()
             self.assertNotEqual(app.canvas.cget("background"), light_background)
+            app.show_latex_dialog()
+            dialog = next(widget for widget in root.winfo_children() if isinstance(widget, tk.Toplevel))
+            source = next(widget for widget in dialog.winfo_children()[0].winfo_children()
+                          if isinstance(widget, tk.Text))
+            self.assertEqual(source.cget("background"), "#ffffff")
+            self.assertEqual(source.cget("foreground"), "#132238")
+            dialog.destroy()
             app.theme_mode.set("automatic")
             app._apply_theme()
             app.grid_size.set(10)
@@ -114,20 +263,19 @@ class GuiSmokeTests(unittest.TestCase):
             app.grid_size.set(40)
             app._grid_spacing_changed()
             self.assertEqual(app._snap_coordinate(26, 20, 700), 40)
-            app.template_list.selection_set(0)
-            app.template_list.event_generate("<<ListboxSelect>>")
+            app._load_template(10)
             root.update()
-            self.assertTrue(app.template_list.curselection())
+            self.assertEqual(app.document.title, "Four-point scalar vertex")
             app.new_document()
             root.update()
-            self.assertFalse(app.template_list.curselection())
+            self.assertEqual(app.project_list.size(), 3)
             self.assertFalse(app.document.vertices)
             inspector_labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
             self.assertNotIn("Diagram name", inspector_labels)
             for tool in ("select", "vertex", "connect", "loop"):
                 app.set_tool(tool)
                 labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
-                self.assertEqual(labels[:2], ["Inspector", "Figure style"])
+                self.assertEqual(labels[0], {"select": "Selection", "vertex": "Add vertex", "connect": "Connect vertices", "loop": "Add loop"}[tool])
                 if tool in ("connect", "loop"):
                     for kind in KINDS:
                         app.new_kind = kind
@@ -138,7 +286,7 @@ class GuiSmokeTests(unittest.TestCase):
                         self.assertIsInstance(children[line_type_index + 1], ttk.Combobox)
                         self.assertEqual(children[line_type_index + 1].get(), kind.title())
 
-            self.assertTrue(app.title_label.bind("<Double-Button-1>"))
+            self.assertTrue(app.title_label.bind("<Button-1>"))
             app.rename_diagram()
             root.update()
             self.assertIsNotNone(app.title_entry)
@@ -170,6 +318,11 @@ class GuiSmokeTests(unittest.TestCase):
             root.destroy()
 
     def test_file_menu_quit_exits_without_popup_error(self):
+        if sys.platform == "darwin":
+            probe = subprocess.run([sys.executable, "-c", "import tkinter as tk; root = tk.Tk(); root.destroy()"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if probe.returncode:
+                self.skipTest("The macOS window server is unavailable")
         try:
             root = tk.Tk()
         except tk.TclError as exc:

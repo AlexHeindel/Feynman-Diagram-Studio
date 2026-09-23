@@ -106,12 +106,13 @@ def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[
         point = sample((cursor - 1 + fraction) / 200)
         phase = 2 * math.pi * cycles * index / count
         if edge.kind == "gluon":
-            taper = min(1, distance / 15)
+            normal = 7 * (1 - math.cos(phase))
+            along = 6 * math.sin(phase)
         else:
             taper = min(1, index / 8, (count - index) / 8)
-        normal = 5 * math.sin(phase) if edge.kind == "photon" else 7 * math.sin(phase) if edge.kind == "gluon" else 0
-        along = 6 * (math.cos(phase) - 1) * taper if edge.kind == "gluon" else 0
-        points.append((point.x + point.nx * normal * taper + point.tx * along, point.y + point.ny * normal * taper + point.ty * along))
+            normal = 5 * math.sin(phase) * taper if edge.kind == "photon" else 0
+            along = 0
+        points.append((point.x + point.nx * normal + point.tx * along, point.y + point.ny * normal + point.ty * along))
     return points, sample(0.5)
 
 
@@ -222,7 +223,8 @@ def momentum_geometry(a: Vertex, b: Vertex, edge: Edge):
              (tip.x - sign * tip.tx * 12 + tip.nx * 5, tip.y - sign * tip.ty * 12 + tip.ny * 5),
              (tip.x - sign * tip.tx * 12 - tip.nx * 5, tip.y - sign * tip.ty * 12 - tip.ny * 5)]
     middle = at((momentum.start + momentum.end) / 2)
-    label = (middle.x + side * middle.nx * 16, middle.y + side * middle.ny * 16)
+    label = (middle.x + side * middle.nx * 30 + momentum.labelX,
+             middle.y + side * middle.ny * 30 + momentum.labelY)
     return [(p.x, p.y) for p in points], arrow, label
 
 

@@ -29,6 +29,9 @@ STATIC_FILES = {
     "/index.html": "index.html",
     "/app.css": "app.css",
     "/app.js": "app.js",
+    "/favicon.svg": "favicon.svg",
+    "/midnight-mark.svg": "midnight-mark.svg",
+    "/DejaVuSerif.woff2": "DejaVuSerif.woff2",
 }
 
 
@@ -226,7 +229,7 @@ def _smoke_test() -> None:
     for name in STATIC_FILES.values():
         if not _asset(name):
             raise RuntimeError("Web application asset is empty: " + name)
-    if len(templates()) != 10:
+    if len(templates()) != 13:
         raise RuntimeError("The web template library is incomplete.")
 
 

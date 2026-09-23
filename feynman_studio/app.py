@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -81,6 +82,19 @@ def _filename(title: str) -> str:
     return name or "diagram"
 
 
+def _label_limits(document: Diagram, source: str, x: float, y: float) -> Tuple[float, float, float, float]:
+    from PIL import Image, ImageDraw
+    from .render import _font, _label_runs
+
+    font = document.style.fontPt * WIDTH / (document.style.widthMm * 72 / 25.4)
+    draw = ImageDraw.Draw(Image.new("L", (1, 1)))
+    width = sum(draw.textlength(run.text, font=_font(round(font * (0.68 if run.script else 1))))
+                for run in _label_runs(source, display_label(source)))
+    half_width = min(max(28, width) / 2, WIDTH / 2)
+    half_height = min(font * 0.8, HEIGHT / 2)
+    return half_width - x, WIDTH - half_width - x, half_height - y, HEIGHT - half_height - y
+
+
 class StudioApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -96,9 +110,13 @@ class StudioApp:
         self.tool = "select"
         self.connection_start: Optional[str] = None
         self.new_kind = "fermion"
+        self.new_arrow = "auto"
+        self.new_marker = "dot"
+        self.new_marker_size = 22.0
         self.loop_mode = "single"
         self.snap = tk.BooleanVar(value=True)
         self.show_grid = tk.BooleanVar(value=False)
+        self.show_figure_panel = tk.BooleanVar(value=False)
         self.grid_size = tk.IntVar(value=int(GRID_SIZE))
         self.theme_mode = tk.StringVar(value="automatic")
         self.active_theme: Optional[str] = None
@@ -112,6 +130,8 @@ class StudioApp:
         self.drag_before: Optional[Diagram] = None
         self.drag_changed = False
         self.current_path: Optional[Path] = None
+        self.projects = [{"id": str(uuid.uuid4()), "diagram": self.document.clone(), "path": None}]
+        self.active_project_id = self.projects[0]["id"]
         self.autosave_job: Optional[str] = None
         self.canvas_preview = None
         self.title_entry: Optional[ttk.Entry] = None
@@ -135,12 +155,13 @@ class StudioApp:
             return
         self.active_theme = theme
         colors = {
-            "light": ("#f3f5f8", "#ffffff", "#e7edf4", "#1f2937", "#64748b", "#e4e9f0", "#bdc7d1", "#2563eb"),
-            "dark": ("#22262e", "#2b303a", "#343c49", "#ecf1f7", "#a8b4c5", "#3a4351", "#566273", "#3b82f6"),
+            "light": ("#e8edf2", "#ffffff", "#d7dee6", "#132238", "#66758a", "#f6f8fa", "#cbd4df", "#087f91"),
+            "dark": ("#08111e", "#18273a", "#0b1522", "#e9f0f7", "#91a3b7", "#142238", "#2c3b4d", "#6adbd4"),
         }
         background, field, canvas, foreground, muted, button, border, accent = colors[theme]
+        accent_ink = "#092228" if theme == "dark" else "#f6ffff"
         self.root.tk_setPalette(background=background, foreground=foreground, activeBackground=button,
-                                activeForeground=foreground, selectBackground=accent, selectForeground="#ffffff")
+                                activeForeground=foreground, selectBackground=accent, selectForeground=accent_ink)
         self.root.configure(background=background)
         style = self.style
         style.configure(".", background=background, foreground=foreground, fieldbackground=field)
@@ -153,7 +174,9 @@ class StudioApp:
         style.map("TButton", background=[("active", border)], foreground=[("disabled", muted)])
         style.configure("Tool.TButton", background=button, foreground=foreground, bordercolor=border, padding=(9, 6))
         style.map("Tool.TButton", background=[("active", border)])
-        style.configure("Selected.Tool.TButton", background=accent, foreground="#ffffff", bordercolor=accent, padding=(9, 6))
+        style.configure("Tool.TMenubutton", background=button, foreground=foreground, bordercolor=border, relief="solid", borderwidth=1, padding=(9, 6))
+        style.map("Tool.TMenubutton", background=[("active", border)])
+        style.configure("Selected.Tool.TButton", background=accent, foreground=accent_ink, bordercolor=accent, padding=(9, 6))
         style.map("Selected.Tool.TButton", background=[("active", accent)])
         style.configure("Menu.TButton", background=background, foreground=foreground, bordercolor=background, padding=(10, 5))
         style.map("Menu.TButton", background=[("active", button)])
@@ -165,10 +188,10 @@ class StudioApp:
         style.configure("TRadiobutton", background=background, foreground=foreground)
         style.configure("TScrollbar", background=button, troughcolor=background, bordercolor=border)
         style.configure("TSeparator", background=border)
-        if hasattr(self, "template_list"):
-            for widget in (self.template_list, self.object_list):
+        if hasattr(self, "project_list"):
+            for widget in (self.project_list, self.object_list):
                 widget.configure(background=field, foreground=foreground, selectbackground=accent,
-                                 selectforeground="#ffffff", highlightbackground=border)
+                                 selectforeground=accent_ink, highlightbackground=border)
             self.canvas.configure(background=canvas)
             self.inspector_canvas.configure(background=background)
 
@@ -193,6 +216,11 @@ class StudioApp:
             menu.add_command(label="Save", accelerator=shortcut + "+S", command=self.save_document)
             menu.add_command(label="Save As…", accelerator=shortcut + "+Shift+S", command=lambda: self.save_document(True))
             menu.add_separator()
+            starting = tk.Menu(menu, tearoff=False)
+            for index, document in enumerate(templates()):
+                starting.add_command(label=document.title, command=lambda value=index: self._load_template(value))
+            menu.add_cascade(label="Starting point", menu=starting)
+            menu.add_separator()
             menu.add_command(label="Export…", accelerator=shortcut + "+E", command=self.show_export_dialog)
             menu.add_command(label="LaTeX Source…", command=self.show_latex_dialog)
             menu.add_separator()
@@ -202,10 +230,12 @@ class StudioApp:
             menu.add_command(label="Redo", accelerator=shortcut + "+Shift+Z", command=self.redo)
             menu.add_separator()
             menu.add_command(label="Rename Diagram…", command=self.rename_diagram)
+            menu.add_command(label="Figure Style…", command=self.show_figure_style_dialog)
             menu.add_command(label="Delete Selection", accelerator="Delete", command=self.remove_selected)
         elif name == "View":
             menu.add_checkbutton(label="Snap to Grid", variable=self.snap, command=self._snap_setting_changed)
             menu.add_checkbutton(label="Show Page Grid", variable=self.show_grid, command=self.redraw)
+            menu.add_checkbutton(label="Show Figure Style Panel", variable=self.show_figure_panel, command=self._rebuild_inspector)
             spacing_menu = tk.Menu(menu, tearoff=False)
             for label, spacing in (("Fine · 10 units", 10), ("Standard · 20 units", 20), ("Coarse · 40 units", 40)):
                 spacing_menu.add_radiobutton(label=label, variable=self.grid_size, value=spacing, command=self._grid_spacing_changed)
@@ -265,23 +295,30 @@ class StudioApp:
         self.history_controls = ttk.Frame(self.library)
         self.history_controls.pack(fill="x", pady=(0, 10))
         self.history_controls.columnconfigure((0, 1), weight=1, uniform="history")
-        self.undo_button = ttk.Button(self.history_controls, text="↶ Undo", command=self.undo)
+        self.undo_button = ttk.Button(self.history_controls, text="↶  Undo", command=self.undo)
         self.undo_button.grid(row=0, column=0, sticky="ew", padx=(0, 2))
-        self.redo_button = ttk.Button(self.history_controls, text="↷ Redo", command=self.redo)
+        self.redo_button = ttk.Button(self.history_controls, text="↷  Redo", command=self.redo)
         self.redo_button.grid(row=0, column=1, sticky="ew", padx=(2, 0))
         ttk.Button(self.library, text="＋ New blank diagram", command=self.new_document).pack(fill="x", pady=(0, 8))
-        ttk.Label(self.library, text="STARTING POINTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
-        self.template_list = tk.Listbox(self.library, exportselection=False, height=12, activestyle="dotbox")
-        for document in templates():
-            self.template_list.insert("end", document.title)
-        self.template_list.pack(fill="x")
-        self.template_list.bind("<<ListboxSelect>>", self._load_selected_template)
+        ttk.Label(self.library, text="MY DIAGRAMS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
+        self.project_list = tk.Listbox(self.library, exportselection=False, height=8, activestyle="dotbox")
+        self.project_list.pack(fill="x")
+        self.project_list.bind("<<ListboxSelect>>", self._open_selected_project)
+        self.project_list.bind("<Double-Button-1>", lambda _event: self.rename_diagram())
+        ttk.Button(self.library, text="Delete diagram…", command=self.delete_project).pack(fill="x", pady=(5, 0))
         ttk.Separator(self.library).pack(fill="x", pady=(12, 8))
         ttk.Label(self.library, text="OBJECTS", style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 6))
-        self.object_list = tk.Listbox(self.library, exportselection=False, activestyle="dotbox")
-        self.object_list.pack(fill="both", expand=True)
+        self.object_host = ttk.Frame(self.library)
+        self.object_host.pack(fill="both", expand=True)
+        self.object_list = tk.Listbox(self.object_host, exportselection=False, activestyle="dotbox")
+        self.object_scrollbar = ttk.Scrollbar(self.object_host, orient="vertical", command=self.object_list.yview)
+        self.object_list.configure(yscrollcommand=self.object_scrollbar.set)
+        self.object_scrollbar.pack(side="right", fill="y")
+        self.object_list.pack(side="left", fill="both", expand=True)
         self.object_list.bind("<<ListboxSelect>>", self._select_object)
-        ttk.Label(self.library, text="Version " + __version__ + " · Native prototype", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        for widget in (self.project_list, self.object_list):
+            self._bind_inspector_wheel(widget)
+        ttk.Label(self.library, text="Version " + __version__ + " · Native edition", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         heading = ttk.Frame(center)
         heading.pack(fill="x", pady=(0, 6))
@@ -290,7 +327,7 @@ class StudioApp:
         ttk.Label(title_block, text="FEYNMAN DIAGRAM", style="Eyebrow.TLabel").pack(anchor="w")
         self.title_label = ttk.Label(title_block, text=self.document.title, style="Heading.TLabel", cursor="hand2")
         self.title_label.pack(anchor="w")
-        self.title_label.bind("<Double-Button-1>", lambda _event: self.rename_diagram())
+        self.title_label.bind("<Button-1>", lambda _event: self.rename_diagram())
         self.diagram_tools = ttk.Frame(center)
         self.diagram_tools.pack(fill="x", pady=(0, 6))
         self.tool_buttons = {}
@@ -298,7 +335,7 @@ class StudioApp:
             button = ttk.Button(self.diagram_tools, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
             button.pack(side="left", fill="x", expand=True, padx=2)
             self.tool_buttons[key] = button
-        annotate = ttk.Menubutton(self.diagram_tools, text="Annotate")
+        annotate = ttk.Menubutton(self.diagram_tools, text="Annotate", style="Tool.TMenubutton")
         annotation_menu = tk.Menu(annotate, tearoff=False)
         annotation_menu.add_command(label="Label", command=lambda: self.set_tool("label"))
         annotation_menu.add_command(label="Arrow", command=lambda: self.set_tool("arrow"))
@@ -313,15 +350,21 @@ class StudioApp:
         self.hint = ttk.Label(center, text="", style="Muted.TLabel")
         self.hint.pack(fill="x", pady=(6, 0))
 
-        self.inspector_canvas = tk.Canvas(inspector_host, highlightthickness=0, width=280)
+        self.inspector_canvas = tk.Canvas(inspector_host, highlightthickness=0, width=250)
         scroll = ttk.Scrollbar(inspector_host, orient="vertical", command=self.inspector_canvas.yview)
         self.inspector = ttk.Frame(self.inspector_canvas, padding=12)
         self.inspector_window = self.inspector_canvas.create_window((0, 0), window=self.inspector, anchor="nw")
         self.inspector_canvas.configure(yscrollcommand=scroll.set)
-        self.inspector_canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        self.inspector_canvas.pack(side="left", fill="both", expand=True)
         self.inspector.bind("<Configure>", self._sync_inspector_scroll)
         self.inspector_canvas.bind("<Configure>", self._size_inspector_window)
+        self._bind_inspector_wheel(self.inspector_canvas)
+        self.root.bind_all("<MouseWheel>", self._scroll_inspector, add=True)
+        self.root.bind_all("<Button-4>", self._scroll_inspector, add=True)
+        self.root.bind_all("<Button-5>", self._scroll_inspector, add=True)
+        if tk.TkVersion >= 9:
+            self.root.bind_all("<TouchpadScroll>", self._scroll_inspector_touchpad, add=True)
 
         status_bar = ttk.Frame(self.root, padding=(10, 4))
         status_bar.pack(fill="x")
@@ -329,6 +372,8 @@ class StudioApp:
         self.count_label.pack(side="left")
         ttk.Label(status_bar, textvariable=self.status).pack(side="right")
         self._update_tool_buttons()
+        self._update_history_controls()
+        self._rebuild_project_list()
         self._rebuild_inspector()
         self._apply_theme(force=True)
 
@@ -341,6 +386,51 @@ class StudioApp:
         current = int(float(self.inspector_canvas.itemcget(self.inspector_window, "width") or 0))
         if current != event.width:
             self.inspector_canvas.itemconfigure(self.inspector_window, width=event.width)
+
+    def _scroll_inspector(self, event) -> Optional[str]:
+        if not self._pointer_over_inspector(event):
+            return None
+        if getattr(event, "num", None) in (4, 5):
+            steps = -1 if event.num == 4 else 1
+        else:
+            delta = event.delta
+            steps = -int(delta / 120) if abs(delta) >= 120 else -int(delta)
+        if steps:
+            self.inspector_canvas.yview_scroll(steps, "units")
+        return "break"
+
+    def _pointer_over_inspector(self, event) -> bool:
+        widget = event.widget
+        while widget is not None:
+            if widget is self.inspector_canvas:
+                return True
+            widget = getattr(widget, "master", None)
+        left, top = self.inspector_canvas.winfo_rootx(), self.inspector_canvas.winfo_rooty()
+        positions = ((event.x_root, event.y_root), self.root.winfo_pointerxy())
+        return any(left <= x < left + self.inspector_canvas.winfo_width()
+                   and top <= y < top + self.inspector_canvas.winfo_height()
+                   for x, y in positions)
+
+    def _scroll_inspector_touchpad(self, event) -> Optional[str]:
+        if not self._pointer_over_inspector(event):
+            return None
+        delta_y = event.delta & 0xFFFF
+        if delta_y >= 0x8000:
+            delta_y -= 0x10000
+        bounds = self.inspector_canvas.bbox("all")
+        if delta_y and bounds:
+            height = bounds[3] - bounds[1]
+            self.inspector_canvas.yview_moveto(self.inspector_canvas.yview()[0] - delta_y / height)
+        return "break"
+
+    def _bind_inspector_wheel(self, widget) -> None:
+        widget.bind("<MouseWheel>", self._scroll_inspector)
+        widget.bind("<Button-4>", self._scroll_inspector)
+        widget.bind("<Button-5>", self._scroll_inspector)
+        if tk.TkVersion >= 9:
+            widget.bind("<TouchpadScroll>", self._scroll_inspector_touchpad)
+        for child in widget.winfo_children():
+            self._bind_inspector_wheel(child)
 
     def _bind_keys(self) -> None:
         self.root.bind_all("<Control-n>", lambda event: self.new_document())
@@ -401,6 +491,7 @@ class StudioApp:
 
     def set_tool(self, tool: str) -> None:
         self.tool = tool
+        self.selected = None
         self.connection_start = None
         self._update_tool_buttons()
         self._rebuild_inspector()
@@ -412,6 +503,10 @@ class StudioApp:
         cursor = {"select": "arrow", "vertex": "crosshair", "connect": "crosshair", "loop": "crosshair", "label": "crosshair", "arrow": "crosshair"}[self.tool]
         if hasattr(self, "canvas"):
             self.canvas.configure(cursor=cursor)
+
+    def _update_history_controls(self) -> None:
+        self.undo_button.configure(state="normal" if self.past else "disabled")
+        self.redo_button.configure(state="normal" if self.future else "disabled")
 
     def commit(self, change: Callable[[Diagram], None], status: str = "Modified") -> None:
         before = self.document.clone()
@@ -428,6 +523,8 @@ class StudioApp:
 
     def _changed(self) -> None:
         self.title_label.configure(text=self.document.title)
+        self._update_history_controls()
+        self._rebuild_project_list()
         self._schedule_autosave()
         self._rebuild_inspector()
         self.redraw()
@@ -489,19 +586,80 @@ class StudioApp:
     def _replace_document(self, document: Diagram, status: str, from_template: bool = False) -> None:
         if self.title_entry is not None:
             self._finish_title_edit(False)
-        if not from_template:
-            self.template_list.selection_clear(0, "end")
-        before = self.document.clone()
+        self._store_active_project()
+        project = {"id": str(uuid.uuid4()), "diagram": document.clone(), "path": None}
+        self.projects.insert(0, project)
+        self.active_project_id = project["id"]
         self.document = document.clone()
         self.selected = None
         self.connection_start = None
         self.current_path = None
-        self._record(before, status)
+        self.past.clear()
+        self.future.clear()
+        self.tool = "select"
+        self.status.set(status)
+        self._changed()
 
-    def _load_selected_template(self, _event) -> None:
-        selection = self.template_list.curselection()
-        if selection:
-            self._replace_document(templates()[selection[0]], "Template loaded", True)
+    def _load_template(self, index: int) -> None:
+        self._replace_document(templates()[index], "Starting point loaded", True)
+
+    def _store_active_project(self) -> None:
+        for project in self.projects:
+            if project["id"] == self.active_project_id:
+                project["diagram"] = self.document.clone()
+                project["path"] = str(self.current_path) if self.current_path else None
+                break
+
+    def _rebuild_project_list(self) -> None:
+        if not hasattr(self, "project_list"):
+            return
+        self.project_list.delete(0, "end")
+        for index, project in enumerate(self.projects):
+            self.project_list.insert("end", self.document.title if project["id"] == self.active_project_id else project["diagram"].title)
+            if project["id"] == self.active_project_id:
+                self.project_list.selection_set(index)
+
+    def _open_selected_project(self, _event=None) -> None:
+        selection = self.project_list.curselection()
+        if not selection:
+            return
+        project = self.projects[selection[0]]
+        if project["id"] == self.active_project_id:
+            return
+        self._store_active_project()
+        self.active_project_id = project["id"]
+        self.document = project["diagram"].clone()
+        self.current_path = Path(project["path"]) if project["path"] else None
+        self.past.clear()
+        self.future.clear()
+        self.selected = None
+        self.tool = "select"
+        self.connection_start = None
+        self.status.set("Diagram opened")
+        self._changed()
+
+    def delete_project(self) -> None:
+        selection = self.project_list.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        name = self.document.title if self.projects[index]["id"] == self.active_project_id else self.projects[index]["diagram"].title
+        if not messagebox.askyesno("Delete diagram?", "Remove '{}' from this app? Save it to a file first if you want to keep a copy.".format(name)):
+            return
+        deleted = self.projects.pop(index)
+        if deleted["id"] == self.active_project_id:
+            if not self.projects:
+                blank = blank_diagram()
+                self.projects.append({"id": str(uuid.uuid4()), "diagram": blank, "path": None})
+            project = self.projects[0]
+            self.active_project_id = project["id"]
+            self.document = project["diagram"].clone()
+            self.current_path = Path(project["path"]) if project["path"] else None
+            self.past.clear()
+            self.future.clear()
+            self.selected = None
+        self.status.set("Diagram deleted")
+        self._changed()
 
     def _select_object(self, _event=None) -> None:
         selection = self.object_list.curselection()
@@ -556,6 +714,8 @@ class StudioApp:
         try:
             path.write_text(self.document.to_json(), encoding="utf-8")
             self.current_path = path
+            self._store_active_project()
+            self._schedule_autosave()
             self.status.set("Project saved")
         except OSError as exc:
             messagebox.showerror("Could not save project", str(exc))
@@ -591,11 +751,11 @@ class StudioApp:
         self.canvas.create_rectangle(ox, oy, ox + page_width, oy + page_height, fill="", outline="#b8c1cc", width=1, tags="paper")
         for vertex in self.document.vertices:
             x, y = self._screen(vertex.x, vertex.y)
-            radius = 7 if vertex.id == self.selected or vertex.id == self.connection_start else 4
-            color = "#2563eb" if vertex.id == self.selected else "#f59e0b" if vertex.id == self.connection_start else "#94a3b8"
+            radius = 7 if (self.tool == "select" and vertex.id == self.selected) or vertex.id == self.connection_start else 4
+            color = "#2563eb" if self.tool == "select" and vertex.id == self.selected else "#f59e0b" if vertex.id == self.connection_start else "#94a3b8"
             self.canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill="white", outline=color, width=2, tags="controls")
         edge = self.document.edge(self.selected or "")
-        if edge:
+        if edge and self.tool == "select":
             for offset in bundle_offsets(edge):
                 points, _ = connected_geometry(self.document, edge, offset)
                 coordinates = [coordinate for point in points for coordinate in self._screen(*point)]
@@ -713,13 +873,13 @@ class StudioApp:
                 start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
                 if start and end:
                     _, _, (lx, ly) = momentum_geometry(start, end, edge)
-                    hits.append(("edge", edge.id, edge.momentum.label, lx, ly))
+                    hits.append(("momentum_label", edge.id, edge.momentum.label, lx, ly))
         for item in self.document.annotations:
             if isinstance(item, FreeLabel) and item.text:
                 hits.append(("annotation_label", item.id, item.text, item.x, item.y))
         nearest = (float("inf"), None, None)
         for kind, object_id, label, lx, ly in hits:
-            half_width = max(18, font * len(display_label(label)) * 0.32)
+            half_width = _label_limits(self.document, label, lx, ly)[0] + lx
             half_height = max(12, font * 0.7)
             if abs(x - lx) <= half_width and abs(y - ly) <= half_height:
                 distance = math.hypot(x - lx, y - ly)
@@ -757,9 +917,13 @@ class StudioApp:
                 x = self._snap_coordinate(x, 20, 700)
                 y = self._snap_coordinate(y, 20, 460)
             item = make_vertex(max(20, min(700, x)), max(20, min(460, y)), visible=True)
-            self.commit(lambda document: document.vertices.append(item), "Vertex added")
+            item.marker = self.new_marker
+            item.visible = self.new_marker != "none"
+            item.markerSize = self.new_marker_size
+            self.tool = "select"
             self.selected = item.id
-            self.set_tool("select")
+            self.commit(lambda document: document.vertices.append(item), "Vertex added")
+            self._update_tool_buttons()
             return
         vertex = self._nearest_vertex(x, y)
         if self.tool == "connect" and vertex:
@@ -812,8 +976,18 @@ class StudioApp:
         elif self.drag_kind == "vertex_label":
             vertex = self.document.vertex(self.drag_id)
             if vertex:
-                vertex.labelX = max(-150, min(150, vertex.labelX + dx))
-                vertex.labelY = max(-150, min(150, vertex.labelY + dy))
+                min_x, max_x, min_y, max_y = _label_limits(self.document, vertex.label, vertex.x, vertex.y)
+                vertex.labelX = max(min_x, min(max_x, vertex.labelX + dx))
+                vertex.labelY = max(min_y, min(max_y, vertex.labelY + dy))
+        elif self.drag_kind == "momentum_label":
+            edge = self.document.edge(self.drag_id)
+            if edge and edge.momentum:
+                start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
+                _, _, (lx, ly) = momentum_geometry(start, end, edge)
+                momentum = edge.momentum
+                min_x, max_x, min_y, max_y = _label_limits(self.document, momentum.label, lx - momentum.labelX, ly - momentum.labelY)
+                momentum.labelX = max(min_x, min(max_x, momentum.labelX + dx))
+                momentum.labelY = max(min_y, min(max_y, momentum.labelY + dy))
         elif self.drag_kind == "edge_label":
             edge = self.document.edge(self.drag_id)
             if edge:
@@ -852,7 +1026,6 @@ class StudioApp:
     def _connect_vertex(self, vertex: Vertex) -> None:
         if self.connection_start is None:
             self.connection_start = vertex.id
-            self.selected = vertex.id
             self.redraw()
             return
         if self.connection_start == vertex.id:
@@ -862,8 +1035,9 @@ class StudioApp:
             messagebox.showerror("Propagator limit", "A project may contain at most 300 propagators.")
             return
         item = make_edge(self.connection_start, vertex.id, self.new_kind)
+        if self.new_arrow != "auto":
+            item.arrow = self.new_arrow
         self.commit(lambda document: document.edges.append(item), "Propagator added")
-        self.selected = item.id
         self.connection_start = None
         self.redraw()
 
@@ -873,12 +1047,10 @@ class StudioApp:
             spaces = ((0, 700 - vertex.x), (90, 460 - vertex.y), (180, vertex.x - 20), (-90, vertex.y - 20))
             item.loopAngle = max(spaces, key=lambda pair: pair[1])[0]
             self.commit(lambda document: document.edges.append(item), "Loop added")
-            self.selected = item.id
             self.redraw()
             return
         if self.connection_start is None:
             self.connection_start = vertex.id
-            self.selected = vertex.id
             self.redraw()
             return
         if self.connection_start == vertex.id:
@@ -894,7 +1066,6 @@ class StudioApp:
         if self.new_kind == "fermion":
             second.arrow = "reverse"
         self.commit(lambda document: document.edges.extend((first, second)), "Two-vertex loop added")
-        self.selected = first.id
         self.connection_start = None
         self.redraw()
 
@@ -912,8 +1083,8 @@ class StudioApp:
 
         def apply(_event=None):
             if variable.get() != applied["value"]:
-                callback(variable.get())
                 applied["value"] = variable.get()
+                callback(applied["value"])
 
         entry.bind("<Return>", apply)
         entry.bind("<FocusOut>", apply)
@@ -939,22 +1110,26 @@ class StudioApp:
     def _rebuild_inspector(self) -> None:
         if not hasattr(self, "inspector"):
             return
+        scroll_y = max(0, self.inspector_canvas.canvasy(0))
         fine = getattr(self, "_fine_placement_frame", None)
         fine_open = (fine is not None and fine.winfo_exists() and fine.winfo_manager()
                      and getattr(self, "_fine_placement_edge_id", None) == self.selected)
         for child in self.inspector.winfo_children():
             child.destroy()
         self._fine_placement_frame = None
-        ttk.Label(self.inspector, text="Inspector", style="Heading.TLabel").pack(anchor="w")
-        self._section("Figure style")
-        self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
-        self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))
-        self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
-        ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
-        ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
+        heading = {"select": "Selection", "vertex": "Add vertex", "connect": "Connect vertices", "loop": "Add loop", "label": "Add label", "arrow": "Add arrow"}[self.tool]
+        ttk.Label(self.inspector, text=heading, style="Heading.TLabel").pack(anchor="w")
+        if self.tool != "select":
+            ttk.Label(self.inspector, text=self._hint_text(), wraplength=240, style="Muted.TLabel").pack(anchor="w", pady=(8, 6))
+        if self.tool == "vertex":
+            self._choice("Vertex icon style", self.new_marker.title(), [marker.title() for marker in MARKERS], self._set_new_marker)
+            if self.new_marker not in ("none", "dot"):
+                self._entry("Icon radius", _clean_number(self.new_marker_size), self._number_callback(lambda value: setattr(self, "new_marker_size", value), 6, 60))
         if self.tool in ("connect", "loop"):
-            self._section("New " + ("propagator" if self.tool == "connect" else "loop"))
             self._choice("Line type", self.new_kind.title(), [kind.title() for kind in KINDS], lambda value: setattr(self, "new_kind", value.lower()))
+            if self.tool == "connect":
+                arrows = {"auto": "Automatic", "forward": "Start → end", "reverse": "End → start", "none": "No arrow"}
+                self._choice("Arrow direction", arrows[self.new_arrow], tuple(arrows.values()), lambda value: setattr(self, "new_arrow", next(key for key, label in arrows.items() if label == value)))
             if self.tool == "loop":
                 self._choice("Loop type", "Single vertex" if self.loop_mode == "single" else "Two vertices", ("Single vertex", "Two vertices"), self._set_loop_mode)
         vertex = self.document.vertex(self.selected or "")
@@ -965,8 +1140,9 @@ class StudioApp:
             self._entry("Label (TeX)", vertex.label, lambda value: self.commit(lambda document: setattr(document.vertex(vertex.id), "label", value)))
             for label, attribute, minimum, maximum in (("X position", "x", 20, 700), ("Y position", "y", 20, 460)):
                 self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: self._set_vertex_coordinate(document.vertex(vertex.id), attr, value)), minimum, maximum))
-            for label, attribute in (("Label X", "labelX"), ("Label Y", "labelY")):
-                self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.vertex(vertex.id), attr, value)), -150, 150))
+            min_x, max_x, min_y, max_y = _label_limits(self.document, vertex.label, vertex.x, vertex.y)
+            for label, attribute, minimum, maximum in (("Label X", "labelX", min_x, max_x), ("Label Y", "labelY", min_y, max_y)):
+                self._entry(label, _clean_number(getattr(vertex, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.vertex(vertex.id), attr, value)), minimum, maximum))
             marker_names = ("None", "Dot", "Open", "Filled", "Hatched", "Crosshatched", "Dotted")
             self._choice("Vertex style", vertex.marker.title(), marker_names, lambda value: self.commit(lambda document: self._set_marker(document.vertex(vertex.id), value.lower())))
             if vertex.marker not in ("none", "dot"):
@@ -997,6 +1173,11 @@ class StudioApp:
             if edge.momentum:
                 momentum = edge.momentum
                 self._entry("Momentum label (TeX)", momentum.label, lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "label", value[:200])))
+                start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
+                _, _, (lx, ly) = momentum_geometry(start, end, edge)
+                min_x, max_x, min_y, max_y = _label_limits(self.document, momentum.label, lx - momentum.labelX, ly - momentum.labelY)
+                for label, attribute, minimum, maximum in (("Momentum label X", "labelX", min_x, max_x), ("Momentum label Y", "labelY", min_y, max_y)):
+                    self._entry(label, _clean_number(getattr(momentum, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.edge(edge.id).momentum, attr, value)), minimum, maximum))
                 self._choice("Momentum direction", momentum.direction.title(), ("Forward", "Reverse"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "direction", value.lower())))
                 self._choice("Momentum side", momentum.side.title(), ("Left", "Right"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "side", value.lower())))
                 fine = ttk.Frame(self.inspector)
@@ -1006,13 +1187,14 @@ class StudioApp:
                     if fine.winfo_manager():
                         fine.pack_forget()
                     else:
-                        fine.pack(fill="x")
-                ttk.Button(self.inspector, text="Fine placement…", command=toggle_fine).pack(fill="x", pady=(5, 0))
+                        fine.pack(fill="x", after=fine_button)
+                fine_button = ttk.Button(self.inspector, text="Fine placement…", command=toggle_fine)
+                fine_button.pack(fill="x", pady=(5, 0))
                 for label, attribute, minimum, maximum in (("Start (%)", "start", 0, 95), ("End (%)", "end", 5, 100)):
                     self._entry(label, _clean_number(getattr(momentum, attribute) * 100), self._number_callback(lambda value, attr=attribute: self._set_momentum_fraction(edge.id, attr, value), minimum, maximum), fine)
                 ttk.Button(fine, text="Arrow color…", command=lambda: self._choose_color("momentum", edge.id)).pack(fill="x", pady=(5, 0))
                 if fine_open:
-                    fine.pack(fill="x")
+                    fine.pack(fill="x", after=fine_button)
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
         elif annotation:
             self._section("Free label" if isinstance(annotation, FreeLabel) else "Free arrow")
@@ -1025,7 +1207,28 @@ class StudioApp:
                 self._entry(label, _clean_number(getattr(annotation, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.annotation(annotation.id), attr, value)), 0, maximum))
             ttk.Button(self.inspector, text="Color…", command=lambda: self._choose_color("annotation", annotation.id)).pack(fill="x", pady=(6, 0))
             ttk.Button(self.inspector, text="Delete annotation", command=self.remove_selected).pack(fill="x", pady=(6, 0))
+        elif self.tool == "select":
+            ttk.Label(self.inspector, text="Click an object on the page or choose one from Objects to edit it. Drag vertices and labels to move them.", wraplength=240, style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        if self.show_figure_panel.get():
+            self._section("Figure style")
+            self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
+            self._entry("Line width (pt)", _clean_number(self.document.style.strokePt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "strokePt", value)), 0.3, 2))
+            self._entry("Text size (pt)", _clean_number(self.document.style.fontPt), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "fontPt", value)), 5, 18))
+            ttk.Checkbutton(self.inspector, text="Snap to grid", variable=self.snap, command=self._snap_setting_changed).pack(anchor="w", pady=(7, 0))
+            ttk.Checkbutton(self.inspector, text="Show page grid", variable=self.show_grid, command=self.redraw).pack(anchor="w")
         self._rebuild_object_list()
+        self._bind_inspector_wheel(self.inspector)
+        def restore_scroll():
+            self.root.update_idletasks()
+            self._sync_inspector_scroll()
+            bounds = self.inspector_canvas.bbox("all")
+            if bounds:
+                self.inspector_canvas.yview_moveto(scroll_y / max(1, bounds[3] - bounds[1]))
+        self.root.after_idle(restore_scroll)
+
+    def _set_new_marker(self, value: str) -> None:
+        self.new_marker = value.lower()
+        self._rebuild_inspector()
 
     def _set_loop_mode(self, value: str) -> None:
         self.loop_mode = "single" if value == "Single vertex" else "double"
@@ -1059,6 +1262,49 @@ class StudioApp:
             value = percentage / 100
             setattr(momentum, attribute, min(value, momentum.end - 0.05) if attribute == "start" else max(value, momentum.start + 0.05))
         self.commit(change, "Momentum arrow updated")
+
+    def show_figure_style_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Figure style")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        values = {}
+        for label, key in (("Figure width (mm)", "widthMm"), ("Line width (pt)", "strokePt"), ("Text size (pt)", "fontPt")):
+            ttk.Label(frame, text=label).pack(anchor="w", pady=(5, 1))
+            variable = tk.StringVar(value=_clean_number(getattr(self.document.style, key)))
+            ttk.Entry(frame, textvariable=variable).pack(fill="x")
+            values[key] = variable
+        snap = tk.BooleanVar(value=self.snap.get())
+        grid = tk.BooleanVar(value=self.show_grid.get())
+        ttk.Checkbutton(frame, text="Snap to grid", variable=snap).pack(anchor="w", pady=(9, 0))
+        ttk.Checkbutton(frame, text="Show page grid", variable=grid).pack(anchor="w")
+
+        def apply() -> None:
+            try:
+                width, stroke, font = (float(values[key].get()) for key in ("widthMm", "strokePt", "fontPt"))
+                if not (60 <= width <= 240 and 0.3 <= stroke <= 2 and 5 <= font <= 18):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid figure style", "Use a width of 60–240 mm, line width of 0.3–2 pt, and text size of 5–18 pt.", parent=dialog)
+                return
+            before = self.document.clone()
+            self.document.style.widthMm, self.document.style.strokePt, self.document.style.fontPt = width, stroke, font
+            if snap.get() and not self.snap.get():
+                self._snap_document(self.document)
+            self.snap.set(snap.get())
+            self.show_grid.set(grid.get())
+            if self.document != before:
+                self._record(before, "Figure style updated")
+            else:
+                self.redraw()
+            dialog.destroy()
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(12, 0))
+        ttk.Button(buttons, text="Apply", command=apply).pack(side="right")
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
     def show_export_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
@@ -1138,7 +1384,9 @@ class StudioApp:
         note = ttk.Label(frame, text="", foreground="#64748b")
         note.pack(fill="x", pady=(8, 4))
         ttk.Label(frame, text="Unavailable for this diagram: " + " · ".join(blocked) if blocked else "All six formats are available for this diagram.", wraplength=780, foreground="#64748b").pack(fill="x", pady=(0, 4))
-        source = tk.Text(frame, wrap="none", font=("TkFixedFont", 11), undo=False)
+        source = tk.Text(frame, wrap="none", font=("TkFixedFont", 11), undo=False,
+                         background="#ffffff", foreground="#132238", insertbackground="#132238",
+                         selectbackground="#bde9e6", selectforeground="#132238")
         yscroll = ttk.Scrollbar(frame, orient="vertical", command=source.yview)
         xscroll = ttk.Scrollbar(frame, orient="horizontal", command=source.xview)
         source.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
@@ -1198,6 +1446,14 @@ class StudioApp:
             path = self._autosave_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(self.document.to_json(), encoding="utf-8")
+            self._store_active_project()
+            projects_path = path.with_name("projects.json")
+            staged = projects_path.with_suffix(".tmp")
+            staged.write_text(json.dumps({"activeId": self.active_project_id, "projects": [
+                {"id": project["id"], "diagram": project["diagram"].to_dict(), "path": project["path"]}
+                for project in self.projects
+            ]}, ensure_ascii=False), encoding="utf-8")
+            staged.replace(projects_path)
             self.status.set("Autosaved locally")
         except OSError:
             self.status.set("Autosave unavailable; use Save")
@@ -1205,14 +1461,40 @@ class StudioApp:
     def _restore_autosave(self) -> None:
         try:
             path = self._autosave_path()
-            if path.exists():
+            projects_path = path.with_name("projects.json")
+            restored = False
+            if projects_path.exists():
+                try:
+                    saved = json.loads(projects_path.read_text(encoding="utf-8"))
+                    projects = [{"id": item["id"], "diagram": Diagram.from_dict(item["diagram"]), "path": item.get("path")}
+                                for item in saved["projects"]]
+                    if not projects or len({item["id"] for item in projects}) != len(projects) or any(not isinstance(item["id"], str) or not item["id"] for item in projects):
+                        raise DiagramError("Invalid local project list.")
+                    active = next((item for item in projects if item["id"] == saved["activeId"]), None)
+                    if active is None:
+                        raise DiagramError("Missing active local project.")
+                    if any(item["path"] is not None and not isinstance(item["path"], str) for item in projects):
+                        raise DiagramError("Invalid local project path.")
+                    self.projects = projects
+                    self.active_project_id = active["id"]
+                    self.document = active["diagram"].clone()
+                    self.current_path = Path(active["path"]) if active["path"] else None
+                    self.status.set("Restored local diagrams")
+                    restored = True
+                except (OSError, DiagramError, ValueError, KeyError, TypeError):
+                    self.status.set("Project list unavailable; trying latest draft")
+            if not restored and path.exists():
                 self.document = Diagram.from_json(path.read_text(encoding="utf-8"))
-                if self.snap.get():
-                    self._snap_document(self.document)
                 self.status.set("Restored local draft")
-                self.title_label.configure(text=self.document.title)
-                self._rebuild_inspector()
-        except (OSError, DiagramError):
+            elif not restored:
+                return
+            if self.snap.get():
+                self._snap_document(self.document)
+            self._store_active_project()
+            self._rebuild_project_list()
+            self.title_label.configure(text=self.document.title)
+            self._rebuild_inspector()
+        except (OSError, DiagramError, ValueError, KeyError, TypeError):
             self.status.set("Could not restore the previous draft")
 
     def _show_shortcuts(self) -> None:
