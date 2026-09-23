@@ -136,8 +136,7 @@ function geometry(a, b, edge, laneOffset = 0) {
       : edge.circular
         ? circularArc(a, b, edge.curvature || 1, t)
         : curve(a, b, edge.curvature, t);
-    const offset = laneOffset * Math.sin(Math.PI * t);
-    return { ...point, x: point.x + point.nx * offset, y: point.y + point.ny * offset };
+    return { ...point, x: point.x + point.nx * laneOffset, y: point.y + point.ny * laneOffset };
   };
   const center = Array.from({ length: 201 }, (_, index) => sample(index / 200));
   const lengths = [0];

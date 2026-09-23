@@ -5,7 +5,7 @@ from pathlib import Path
 
 from feynman_studio.geometry import curve, geometry
 from feynman_studio.latex import FORMATS, latex_source, standalone_source
-from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, make_edge, make_vertex, snap_value, templates
+from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, bundle_offsets, make_edge, make_vertex, snap_value, templates
 from feynman_studio.render import Text, _label_runs, display_label, make_scene, render_preview, save_pdf, save_raster, svg_document
 
 try:
@@ -123,6 +123,14 @@ class GeometryTests(unittest.TestCase):
         self.assertAlmostEqual(points[0][1], points[-1][1])
         self.assertLess(middle.y, 170)
         self.assertTrue(all(math.isfinite(value) for pair in points for value in pair))
+
+    def test_quark_bundle_lanes_remain_parallel_at_the_endpoints(self):
+        left, right = make_vertex(100, 240), make_vertex(620, 240)
+        edge = make_edge(left.id, right.id)
+        edge.bundle, edge.bundleSpacing = 3, 20
+        lanes = [geometry(left, right, edge, offset)[0] for offset in bundle_offsets(edge)]
+        for points, expected_y in zip(lanes, (220, 240, 260)):
+            self.assertTrue(all(abs(y - expected_y) < 1e-9 for _, y in points))
 
     def test_gluon_curls_stay_between_straight_line_endpoints(self):
         top, bottom = make_vertex(360, 100), make_vertex(360, 380)

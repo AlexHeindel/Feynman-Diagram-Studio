@@ -84,8 +84,7 @@ def geometry(a: Vertex, b: Vertex, edge: Edge, lane_offset: float = 0) -> Tuple[
             point = circular_arc(a, b, edge.curvature or 1, t)
         else:
             point = curve(a, b, edge.curvature, t)
-        offset = lane_offset * math.sin(math.pi * t)
-        return Sample(point.x + point.nx * offset, point.y + point.ny * offset, point.tx, point.ty, point.nx, point.ny)
+        return Sample(point.x + point.nx * lane_offset, point.y + point.ny * lane_offset, point.tx, point.ty, point.nx, point.ny)
 
     center = [sample(index / 200) for index in range(201)]
     lengths = [0.0]
