@@ -18,6 +18,7 @@ A lightweight desktop and local browser editor for drawing publication-ready Fey
 - Editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
 - LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
+- Shared version 2 project files; version 1 files open with empty annotations
 
 ### Feynman diagram features
 
@@ -26,7 +27,10 @@ A lightweight desktop and local browser editor for drawing publication-ready Fey
 - Forward and reverse arrows
 - Open, filled, hatched, crosshatched, dotted, and standard interaction vertices
 - Edit propagator colors and vertex or propagator labels, with independent label positioning
+- Add labeled momentum arrows alongside propagators, or place free labels and arrows anywhere on the page
 - Ten starting templates
+
+The LaTeX dialogs show which formats cannot preserve a particular diagram. feynMF does not support custom line or annotation colors, and feynMP/feynMF cannot preserve quark-bundle spacing. Image exports remain available.
 
 ## Install and run
 

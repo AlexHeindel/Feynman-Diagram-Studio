@@ -2,6 +2,7 @@ import http.client
 import json
 import threading
 import unittest
+from pathlib import Path
 
 from feynman_studio.latex import latex_source
 from feynman_studio.model import templates
@@ -86,6 +87,23 @@ class WebAppTests(unittest.TestCase):
         result = json.loads(body)
         self.assertEqual(result["source"], latex_source(document, "tikz-feynhand"))
         self.assertIn(r"\documentclass", result["standalone"])
+
+    def test_version_two_annotations_validate_export_and_reject_lossy_latex(self):
+        document = json.loads((Path(__file__).parent / "fixtures" / "annotations-v2.json").read_text())
+        status, _headers, body = self.request("POST", "/api/validate", {"diagram": document})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["diagram"], document)
+        for format_name in ("tikz-feynman", "tikz-feynhand", "feynmp", "feynmf", "pst-feyn", "axodraw2"):
+            status, _headers, body = self.request("POST", "/api/latex", {"diagram": document, "format": format_name})
+            self.assertEqual(status, 200, format_name + ": " + body.decode()[:120])
+        document["annotations"][0]["color"] = "#FF0000"
+        status, _headers, body = self.request("POST", "/api/latex", {"diagram": document, "format": "feynmf"})
+        self.assertEqual(status, 400)
+        self.assertIn("Custom colors", json.loads(body)["error"])
+        for format_name, signature in (("svg", b"<svg"), ("pdf", b"%PDF-"), ("png", b"\x89PNG"), ("jpg", b"\xff\xd8")):
+            status, _headers, body = self.request("POST", "/api/export", {"diagram": document, "format": format_name, "ppi": 300, "transparent": False})
+            self.assertEqual(status, 200, format_name)
+            self.assertTrue(body.startswith(signature), format_name)
 
     def test_all_native_export_formats_are_downloadable(self):
         document = templates()[2].to_dict()

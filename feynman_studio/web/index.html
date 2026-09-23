@@ -63,6 +63,9 @@
               <button type="button" data-tool="vertex">Add Vertex <kbd>A</kbd></button>
               <button type="button" data-tool="connect">Connect Vertices <kbd>C</kbd></button>
               <button type="button" data-tool="loop">Add Loop <kbd>L</kbd></button>
+              <hr>
+              <button type="button" data-tool="label">Add Free Label</button>
+              <button type="button" data-tool="arrow">Add Free Arrow</button>
             </div>
           </details>
           <details class="menu">
@@ -108,6 +111,7 @@
             <button type="button" data-tool="vertex">Vertex</button>
             <button type="button" data-tool="connect">Connect</button>
             <button type="button" data-tool="loop">Loop</button>
+            <details class="annotation-tools"><summary>Annotate</summary><div class="annotation-menu"><button type="button" data-tool="label">Label</button><button type="button" data-tool="arrow">Arrow</button></div></details>
           </div>
           <div class="canvas-stage">
             <svg id="diagram-canvas" viewBox="0 0 720 480" role="img" aria-label="Editable Feynman diagram"></svg>
@@ -162,6 +166,7 @@
           <button class="icon-button" value="cancel" aria-label="Close">×</button>
         </div>
         <label class="field">Format<select id="latex-format"></select></label>
+        <p id="latex-compat" class="muted" role="status"></p>
         <textarea id="latex-source" readonly spellcheck="false" aria-label="LaTeX source"></textarea>
         <div class="dialog-actions">
           <button value="cancel">Close</button>

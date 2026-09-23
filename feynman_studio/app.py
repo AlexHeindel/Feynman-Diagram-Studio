@@ -13,8 +13,8 @@ import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from . import __version__
-from .geometry import distance_to_polyline, edge_label_position, geometry
-from .latex import FORMATS, latex_source, standalone_source
+from .geometry import distance_to_polyline, edge_label_position, geometry, momentum_geometry
+from .latex import FORMATS, latex_source, standalone_source, unsupported_features
 from .model import (
     GRID_SIZE,
     HEIGHT,
@@ -24,9 +24,13 @@ from .model import (
     Diagram,
     DiagramError,
     Edge,
+    FreeLabel,
+    FreeArrow,
+    Momentum,
     Vertex,
     blank_diagram,
     make_edge,
+    make_annotation,
     make_vertex,
     snap_value,
     templates,
@@ -212,6 +216,10 @@ class StudioApp:
         elif name == "Tools":
             for label, tool in (("Select", "select"), ("Add Vertex", "vertex"), ("Connect Vertices", "connect"), ("Add Loop", "loop")):
                 menu.add_command(label=label, command=lambda value=tool: self.set_tool(value))
+            annotation_menu = tk.Menu(menu, tearoff=False)
+            annotation_menu.add_command(label="Label", command=lambda: self.set_tool("label"))
+            annotation_menu.add_command(label="Arrow", command=lambda: self.set_tool("arrow"))
+            menu.add_cascade(label="Annotate", menu=annotation_menu)
         else:
             menu.add_command(label="Keyboard Shortcuts", command=self._show_shortcuts)
             menu.add_command(label="About", command=lambda: messagebox.showinfo("About", APP_NAME + "\nVersion " + __version__ + "\nOpen source under the MIT License"))
@@ -289,6 +297,12 @@ class StudioApp:
             button = ttk.Button(self.diagram_tools, text=label, style="Tool.TButton", command=lambda value=key: self.set_tool(value))
             button.pack(side="left", fill="x", expand=True, padx=2)
             self.tool_buttons[key] = button
+        annotate = ttk.Menubutton(self.diagram_tools, text="Annotate")
+        annotation_menu = tk.Menu(annotate, tearoff=False)
+        annotation_menu.add_command(label="Label", command=lambda: self.set_tool("label"))
+        annotation_menu.add_command(label="Arrow", command=lambda: self.set_tool("arrow"))
+        annotate.configure(menu=annotation_menu)
+        annotate.pack(side="left", fill="x", expand=True, padx=2)
         self.canvas = tk.Canvas(center, background="#dfe5eb", highlightthickness=0, cursor="arrow")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda event: self.redraw())
@@ -394,7 +408,7 @@ class StudioApp:
     def _update_tool_buttons(self) -> None:
         for key, button in self.tool_buttons.items():
             button.configure(style="Selected.Tool.TButton" if key == self.tool else "Tool.TButton")
-        cursor = {"select": "arrow", "vertex": "crosshair", "connect": "crosshair", "loop": "crosshair"}[self.tool]
+        cursor = {"select": "arrow", "vertex": "crosshair", "connect": "crosshair", "loop": "crosshair", "label": "crosshair", "arrow": "crosshair"}[self.tool]
         if hasattr(self, "canvas"):
             self.canvas.configure(cursor=cursor)
 
@@ -505,6 +519,9 @@ class StudioApp:
         for index, item in enumerate(self.document.edges, 1):
             self.object_list.insert("end", "{} {}".format(item.kind.title(), index))
             self.object_ids.append(item.id)
+        for index, item in enumerate(self.document.annotations, 1):
+            self.object_list.insert("end", "Label {} · {}".format(index, display_label(item.text)) if isinstance(item, FreeLabel) else "Arrow {}".format(index))
+            self.object_ids.append(item.id)
         if self.selected in self.object_ids:
             selected_index = self.object_ids.index(self.selected)
             self.object_list.selection_set(selected_index)
@@ -583,12 +600,21 @@ class StudioApp:
                 points, _ = geometry(start, end, edge)
                 coordinates = [coordinate for point in points for coordinate in self._screen(*point)]
                 self.canvas.create_line(*coordinates, fill="#2563eb", width=2, dash=(5, 4), tags="controls")
-        self.count_label.configure(text="{} vertices · {} propagators".format(len(self.document.vertices), len(self.document.edges)))
+        annotation = self.document.annotation(self.selected or "")
+        if annotation:
+            x, y = (annotation.x, annotation.y) if isinstance(annotation, FreeLabel) else ((annotation.x1 + annotation.x2) / 2, (annotation.y1 + annotation.y2) / 2)
+            sx, sy = self._screen(x, y)
+            self.canvas.create_oval(sx - 5, sy - 5, sx + 5, sy + 5, fill="white", outline="#2563eb", width=2, tags="controls")
+        self.count_label.configure(text="{} vertices · {} propagators · {} annotations".format(len(self.document.vertices), len(self.document.edges), len(self.document.annotations)))
         self.hint.configure(text=self._hint_text())
 
     def _hint_text(self) -> str:
         if self.tool == "vertex":
             return "Click the page to place a vertex."
+        if self.tool == "label":
+            return "Click the page to place a free label."
+        if self.tool == "arrow":
+            return "Drag on the page to draw a free arrow."
         if self.tool == "connect":
             return "Choose the second vertex." if self.connection_start else "Choose two vertices to connect, in the direction of particle flow."
         if self.tool == "loop":
@@ -656,7 +682,18 @@ class StudioApp:
                 distance = distance_to_polyline(x, y, points)
                 if distance < best[0]:
                     best = (distance, edge)
+                if edge.momentum:
+                    momentum_points, _, _ = momentum_geometry(start, end, edge)
+                    distance = distance_to_polyline(x, y, momentum_points)
+                    if distance < best[0]:
+                        best = (distance, edge)
         return best[1]
+
+    def _nearest_annotation_arrow(self, x: float, y: float):
+        for item in reversed(self.document.annotations):
+            if isinstance(item, FreeArrow) and distance_to_polyline(x, y, ((item.x1, item.y1), (item.x2, item.y2))) <= 12 / self.canvas_scale:
+                return item
+        return None
 
     def _label_hit(self, x: float, y: float) -> Tuple[Optional[str], Optional[str]]:
         font = self.document.style.fontPt * WIDTH / (self.document.style.widthMm * 72 / 25.4)
@@ -671,6 +708,14 @@ class StudioApp:
                     _, middle = geometry(start, end, edge)
                     lx, ly = edge_label_position(middle, edge)
                     hits.append(("edge_label", edge.id, edge.label, lx, ly))
+            if edge.momentum and edge.momentum.label:
+                start, end = self.document.vertex(edge.from_), self.document.vertex(edge.to)
+                if start and end:
+                    _, _, (lx, ly) = momentum_geometry(start, end, edge)
+                    hits.append(("edge", edge.id, edge.momentum.label, lx, ly))
+        for item in self.document.annotations:
+            if isinstance(item, FreeLabel) and item.text:
+                hits.append(("annotation_label", item.id, item.text, item.x, item.y))
         nearest = (float("inf"), None, None)
         for kind, object_id, label, lx, ly in hits:
             half_width = max(18, font * len(display_label(label)) * 0.32)
@@ -684,6 +729,24 @@ class StudioApp:
     def _canvas_down(self, event) -> None:
         x, y = self._document_point(event)
         if not self._inside_page(x, y):
+            return
+        if self.tool in ("label", "arrow"):
+            if len(self.document.annotations) >= 300:
+                messagebox.showerror("Annotation limit", "A project may contain at most 300 annotations.")
+                return
+            item = make_annotation(self.tool, x, y)
+            if self.tool == "label":
+                self.commit(lambda document: document.annotations.append(item), "Label added")
+                self.selected = item.id
+                self.set_tool("select")
+            else:
+                self.drag_before = self.document.clone()
+                self.document.annotations.append(item)
+                self.selected = item.id
+                self.drag_kind, self.drag_id = "new_arrow", item.id
+                self.drag_origin = (x, y)
+                self.drag_changed = True
+                self.redraw()
             return
         if self.tool == "vertex":
             if len(self.document.vertices) >= 150:
@@ -714,9 +777,14 @@ class StudioApp:
             self.selected = vertex.id
             self.drag_kind, self.drag_id = "vertex", vertex.id
         else:
-            edge = self._nearest_edge(x, y)
-            self.selected = edge.id if edge else None
-            self.drag_kind = self.drag_id = None
+            arrow = self._nearest_annotation_arrow(x, y)
+            if arrow:
+                self.selected = arrow.id
+                self.drag_kind, self.drag_id = "annotation_arrow", arrow.id
+            else:
+                edge = self._nearest_edge(x, y)
+                self.selected = edge.id if edge else None
+                self.drag_kind = self.drag_id = None
         if self.drag_id:
             self.drag_before = self.document.clone()
             self.drag_origin = (x, y)
@@ -750,16 +818,35 @@ class StudioApp:
             if edge:
                 edge.labelX = max(-150, min(150, edge.labelX + dx))
                 edge.labelY = max(-150, min(150, edge.labelY + dy))
+        elif self.drag_kind == "annotation_label":
+            item = self.document.annotation(self.drag_id)
+            if isinstance(item, FreeLabel):
+                item.x = max(0, min(720, item.x + dx))
+                item.y = max(0, min(480, item.y + dy))
+        elif self.drag_kind == "annotation_arrow":
+            item = self.document.annotation(self.drag_id)
+            if isinstance(item, FreeArrow):
+                dx = max(-min(item.x1, item.x2), min(720 - max(item.x1, item.x2), dx))
+                dy = max(-min(item.y1, item.y2), min(480 - max(item.y1, item.y2), dy))
+                item.x1 += dx; item.x2 += dx; item.y1 += dy; item.y2 += dy
+        elif self.drag_kind == "new_arrow":
+            item = self.document.annotation(self.drag_id)
+            if isinstance(item, FreeArrow):
+                item.x2 = max(0, min(720, x))
+                item.y2 = max(0, min(480, y))
         self.drag_origin = (x, y)
         self.drag_changed = True
         self.redraw()
 
     def _canvas_up(self, _event) -> None:
+        new_arrow = self.drag_kind == "new_arrow"
         if self.drag_changed and self.drag_before:
             self._record(self.drag_before, "Object moved")
         self.drag_kind = self.drag_id = None
         self.drag_before = None
         self.drag_changed = False
+        if new_arrow:
+            self.set_tool("select")
 
     def _connect_vertex(self, vertex: Vertex) -> None:
         if self.connection_start is None:
@@ -814,10 +901,11 @@ class StudioApp:
         ttk.Separator(self.inspector).pack(fill="x", pady=(10, 8))
         ttk.Label(self.inspector, text=title, style="Heading.TLabel").pack(anchor="w", pady=(0, 5))
 
-    def _entry(self, label: str, value, callback: Callable[[str], None]) -> None:
-        ttk.Label(self.inspector, text=label).pack(anchor="w", pady=(4, 1))
+    def _entry(self, label: str, value, callback: Callable[[str], None], parent=None) -> None:
+        parent = parent or self.inspector
+        ttk.Label(parent, text=label).pack(anchor="w", pady=(4, 1))
         variable = tk.StringVar(value=str(value))
-        entry = ttk.Entry(self.inspector, textvariable=variable)
+        entry = ttk.Entry(parent, textvariable=variable)
         entry.pack(fill="x")
         applied = {"value": str(value)}
 
@@ -866,6 +954,7 @@ class StudioApp:
                 self._choice("Loop type", "Single vertex" if self.loop_mode == "single" else "Two vertices", ("Single vertex", "Two vertices"), self._set_loop_mode)
         vertex = self.document.vertex(self.selected or "")
         edge = self.document.edge(self.selected or "")
+        annotation = self.document.annotation(self.selected or "")
         if vertex:
             self._section("Vertex")
             self._entry("Label (TeX)", vertex.label, lambda value: self.commit(lambda document: setattr(document.vertex(vertex.id), "label", value)))
@@ -898,7 +987,35 @@ class StudioApp:
             for label, attribute in (("Label X", "labelX"), ("Label Y", "labelY")):
                 self._entry(label, _clean_number(getattr(edge, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.edge(edge.id), attr, value)), -150, 150))
             ttk.Button(self.inspector, text="Line color…", command=lambda: self._choose_edge_color(edge.id)).pack(fill="x", pady=(6, 0))
+            enabled = tk.BooleanVar(value=edge.momentum is not None)
+            ttk.Checkbutton(self.inspector, text="Momentum arrow", variable=enabled, command=lambda: self.commit(lambda document: setattr(document.edge(edge.id), "momentum", Momentum(color=edge.color, side="right" if edge.labelOffset < 0 else "left") if enabled.get() else None), "Momentum arrow updated")).pack(anchor="w", pady=(7, 0))
+            if edge.momentum:
+                momentum = edge.momentum
+                self._entry("Momentum label (TeX)", momentum.label, lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "label", value[:200])))
+                self._choice("Momentum direction", momentum.direction.title(), ("Forward", "Reverse"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "direction", value.lower())))
+                self._choice("Momentum side", momentum.side.title(), ("Left", "Right"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "side", value.lower())))
+                fine = ttk.Frame(self.inspector)
+                def toggle_fine():
+                    if fine.winfo_manager():
+                        fine.pack_forget()
+                    else:
+                        fine.pack(fill="x")
+                ttk.Button(self.inspector, text="Fine placement…", command=toggle_fine).pack(fill="x", pady=(5, 0))
+                for label, attribute, minimum, maximum in (("Start (%)", "start", 0, 95), ("End (%)", "end", 5, 100)):
+                    self._entry(label, _clean_number(getattr(momentum, attribute) * 100), self._number_callback(lambda value, attr=attribute: self._set_momentum_fraction(edge.id, attr, value), minimum, maximum), fine)
+                ttk.Button(fine, text="Arrow color…", command=lambda: self._choose_color("momentum", edge.id)).pack(fill="x", pady=(5, 0))
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
+        elif annotation:
+            self._section("Free label" if isinstance(annotation, FreeLabel) else "Free arrow")
+            if isinstance(annotation, FreeLabel):
+                self._entry("Label (TeX)", annotation.text, lambda value: self.commit(lambda document: setattr(document.annotation(annotation.id), "text", value[:200])))
+                fields = (("X position", "x", 720), ("Y position", "y", 480))
+            else:
+                fields = (("X1", "x1", 720), ("Y1", "y1", 480), ("X2", "x2", 720), ("Y2", "y2", 480))
+            for label, attribute, maximum in fields:
+                self._entry(label, _clean_number(getattr(annotation, attribute)), self._number_callback(lambda value, attr=attribute: self.commit(lambda document: setattr(document.annotation(annotation.id), attr, value)), 0, maximum))
+            ttk.Button(self.inspector, text="Color…", command=lambda: self._choose_color("annotation", annotation.id)).pack(fill="x", pady=(6, 0))
+            ttk.Button(self.inspector, text="Delete annotation", command=self.remove_selected).pack(fill="x", pady=(6, 0))
         self._rebuild_object_list()
 
     def _set_loop_mode(self, value: str) -> None:
@@ -918,6 +1035,21 @@ class StudioApp:
         color = colorchooser.askcolor(edge.color, title="Choose line color")[1]
         if color:
             self.commit(lambda document: setattr(document.edge(edge_id), "color", color))
+
+    def _choose_color(self, kind: str, object_id: str) -> None:
+        target = self.document.edge(object_id).momentum if kind == "momentum" else self.document.annotation(object_id)
+        if target is None:
+            return
+        color = colorchooser.askcolor(target.color, title="Choose color")[1]
+        if color:
+            self.commit(lambda document: setattr(document.edge(object_id).momentum if kind == "momentum" else document.annotation(object_id), "color", color))
+
+    def _set_momentum_fraction(self, edge_id: str, attribute: str, percentage: float) -> None:
+        def change(document):
+            momentum = document.edge(edge_id).momentum
+            value = percentage / 100
+            setattr(momentum, attribute, min(value, momentum.end - 0.05) if attribute == "start" else max(value, momentum.start + 0.05))
+        self.commit(change, "Momentum arrow updated")
 
     def show_export_dialog(self) -> None:
         dialog = tk.Toplevel(self.root)
@@ -988,12 +1120,15 @@ class StudioApp:
         header = ttk.Frame(frame)
         header.pack(fill="x")
         ttk.Label(header, text="LaTeX source", style="Heading.TLabel").pack(side="left")
-        labels = [item.label for item in FORMATS]
+        available = [item for item in FORMATS if not unsupported_features(self.document, item.value)]
+        blocked = ["{}: {}".format(item.label, "; ".join(unsupported_features(self.document, item.value))) for item in FORMATS if unsupported_features(self.document, item.value)]
+        labels = [item.label for item in available]
         format_var = tk.StringVar(value=labels[0])
         combo = ttk.Combobox(header, state="readonly", textvariable=format_var, values=labels, width=24)
         combo.pack(side="right")
         note = ttk.Label(frame, text="", foreground="#64748b")
         note.pack(fill="x", pady=(8, 4))
+        ttk.Label(frame, text="Unavailable for this diagram: " + " · ".join(blocked) if blocked else "All six formats are available for this diagram.", wraplength=780, foreground="#64748b").pack(fill="x", pady=(0, 4))
         source = tk.Text(frame, wrap="none", font=("TkFixedFont", 11), undo=False)
         yscroll = ttk.Scrollbar(frame, orient="vertical", command=source.yview)
         xscroll = ttk.Scrollbar(frame, orient="horizontal", command=source.xview)
@@ -1003,7 +1138,7 @@ class StudioApp:
         xscroll.pack(side="bottom", fill="x")
 
         def selected_format():
-            return FORMATS[labels.index(format_var.get())]
+            return available[labels.index(format_var.get())]
 
         def refresh(_event=None):
             option = selected_format()

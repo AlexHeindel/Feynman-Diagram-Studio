@@ -253,6 +253,11 @@ hr { border: 0; border-top: 1px solid var(--border); }
 .tool-buttons { margin-bottom: 6px; }
 .tool-buttons button { flex: 1; }
 .tool-buttons button.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); font-weight: 650; }
+.annotation-tools { position: relative; flex: 1; }
+.annotation-tools summary { padding: 9px 12px; cursor: pointer; text-align: center; list-style: none; }
+.annotation-tools summary::-webkit-details-marker { display: none; }
+.annotation-menu { position: absolute; z-index: 20; right: 0; top: 100%; display: grid; min-width: 130px; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0003; }
+.annotation-menu button { text-align: left; }
 .canvas-stage {
   display: grid;
   flex: 1;

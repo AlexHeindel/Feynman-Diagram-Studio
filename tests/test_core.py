@@ -1,10 +1,11 @@
 import math
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from feynman_studio.geometry import curve, geometry
-from feynman_studio.latex import FORMATS, latex_source, standalone_source
+from feynman_studio.geometry import curve, geometry, momentum_geometry
+from feynman_studio.latex import FORMATS, latex_source, standalone_source, unsupported_features
 from feynman_studio.model import GRID_SIZE, Diagram, DiagramError, KINDS, blank_diagram, bundle_offsets, make_edge, make_vertex, snap_value, templates
 from feynman_studio.render import Text, _label_runs, display_label, make_scene, render_preview, save_pdf, save_raster, svg_document
 
@@ -15,6 +16,52 @@ except ImportError:  # The source-only core remains testable without the optiona
 
 
 class ModelTests(unittest.TestCase):
+    def test_version_two_annotations_round_trip_and_capabilities(self):
+        source = json.loads((Path(__file__).parent / "fixtures" / "annotations-v2.json").read_text())
+        diagram = Diagram.from_dict(source)
+        self.assertEqual(Diagram.from_json(diagram.to_json()), diagram)
+        self.assertEqual(len(diagram.annotations), 2)
+        self.assertTrue(any(item.source == "p" for item in make_scene(diagram) if isinstance(item, Text)))
+        for option in FORMATS:
+            self.assertEqual(unsupported_features(diagram, option.value), [])
+            self.assertIn("Gamma", latex_source(diagram, option.value))
+        for change in (
+            lambda raw: raw["annotations"][0].update(id="left"),
+            lambda raw: raw["annotations"][0].update(x=721),
+            lambda raw: raw["annotations"][0].update(text="a" * 201),
+            lambda raw: raw["annotations"][1].update(color="red"),
+            lambda raw: raw["edges"][0]["momentum"].update(start=0.8),
+        ):
+            invalid = json.loads(json.dumps(source))
+            change(invalid)
+            with self.assertRaises(DiagramError):
+                Diagram.from_dict(invalid)
+        diagram.annotations[0].color = "#FF0000"
+        self.assertIn("Custom colors", unsupported_features(diagram, "feynmf")[0])
+        with self.assertRaises(ValueError):
+            latex_source(diagram, "feynmf")
+        diagram.edges[0].bundle = 3
+        self.assertIn("Quark bundle", unsupported_features(diagram, "feynmp")[0])
+
+    def test_momentum_short_reversed_and_curved(self):
+        raw = json.loads((Path(__file__).parent / "fixtures" / "annotations-v2.json").read_text())
+        diagram = Diagram.from_dict(raw)
+        edge = diagram.edges[0]
+        edge.momentum.start, edge.momentum.end = 0.42, 0.58
+        for curvature in (0, 100, -100):
+            edge.curvature = curvature
+            for direction in ("forward", "reverse"):
+                edge.momentum.direction = direction
+                points, arrow, label = momentum_geometry(diagram.vertices[0], diagram.vertices[1], edge)
+                self.assertGreaterEqual(len(points), 3)
+                self.assertTrue(all(math.isfinite(v) for point in (*points, *arrow, label) for v in point))
+                self.assertEqual(arrow[0], points[-1] if direction == "forward" else points[0])
+        edge.to = edge.from_
+        edge.curvature = 0
+        points, arrow, label = momentum_geometry(diagram.vertices[0], diagram.vertices[0], edge)
+        self.assertGreater(len(points), 3)
+        self.assertTrue(all(math.isfinite(v) for point in (*points, *arrow, label) for v in point))
+
     def test_templates_round_trip_through_project_json(self):
         for document in templates():
             self.assertEqual(Diagram.from_json(document.to_json()), document)
@@ -69,7 +116,7 @@ class ModelTests(unittest.TestCase):
         duplicate["vertices"][1]["id"] = duplicate["vertices"][0]["id"]
         cases.append(duplicate)
         version = Diagram.from_dict(base).to_dict()
-        version["version"] = 2
+        version["version"] = 3
         cases.append(version)
         nonfinite = Diagram.from_dict(base).to_dict()
         nonfinite["vertices"][0]["x"] = math.inf

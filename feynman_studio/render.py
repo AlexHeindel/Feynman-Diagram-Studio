@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple, Union
 
-from .geometry import edge_label_position, geometry
-from .model import GRID_SIZE, HEIGHT, WIDTH, Diagram, Edge, Vertex, bundle_offsets
+from .geometry import edge_label_position, geometry, momentum_geometry
+from .model import GRID_SIZE, HEIGHT, WIDTH, Diagram, Edge, Vertex, FreeLabel, bundle_offsets
 
 Point = Tuple[float, float]
 
@@ -225,6 +225,25 @@ def make_scene(document: Diagram) -> List[Primitive]:
                     edge.label,
                 )
             )
+        if edge.momentum:
+            points, arrow, label = momentum_geometry(start, end, edge)
+            scene.append(Polyline(points, edge.momentum.color, stroke * 0.8))
+            scene.append(Polygon(arrow, edge.momentum.color))
+            if edge.momentum.label:
+                scene.append(Text(label, display_label(edge.momentum.label), edge.momentum.color, font, edge.momentum.label))
+    for item in document.annotations:
+        if isinstance(item, FreeLabel):
+            if item.text:
+                scene.append(Text((item.x, item.y), display_label(item.text), item.color, font, item.text))
+        else:
+            dx, dy = item.x2 - item.x1, item.y2 - item.y1
+            size = math.hypot(dx, dy)
+            if size < 1:
+                continue
+            tx, ty = dx / size, dy / size
+            nx, ny = -ty, tx
+            scene.append(Polyline([(item.x1, item.y1), (item.x2, item.y2)], item.color, stroke))
+            scene.append(Polygon([(item.x2, item.y2), (item.x2 - tx * 12 + nx * 5, item.y2 - ty * 12 + ny * 5), (item.x2 - tx * 12 - nx * 5, item.y2 - ty * 12 - ny * 5)], item.color))
     for vertex in document.vertices:
         _marker(scene, vertex, stroke)
         if vertex.label:

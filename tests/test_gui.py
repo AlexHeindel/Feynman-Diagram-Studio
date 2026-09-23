@@ -211,6 +211,41 @@ class GuiSmokeTests(unittest.TestCase):
         app.undo()
         self.assertEqual((app.document.edges[0].labelX, app.document.edges[0].labelY), (0, 0))
 
+    def test_free_annotations_create_drag_and_undo_without_a_window(self):
+        app = StudioApp.__new__(StudioApp)
+        app.document = blank_diagram()
+        app.selected = None
+        app.tool = "label"
+        app.canvas_scale = 1
+        app.canvas_offset = (0, 0)
+        app.drag_kind = app.drag_id = app.drag_before = None
+        app.drag_changed = False
+        app.past, app.future = [], []
+        app.status = SimpleNamespace(set=lambda value: None)
+        app.redraw = lambda: None
+        app._rebuild_inspector = lambda: None
+        app._changed = lambda: None
+        app.set_tool = lambda tool: setattr(app, "tool", tool)
+        point = lambda x, y: SimpleNamespace(x=x, y=y)
+
+        app._canvas_down(point(250, 80))
+        self.assertEqual((app.tool, len(app.document.annotations)), ("select", 1))
+        label_id = app.document.annotations[0].id
+        app._canvas_down(point(250, 80))
+        app._canvas_drag(point(280, 100))
+        app._canvas_up(None)
+        self.assertEqual((app.document.annotations[0].x, app.document.annotations[0].y), (280, 100))
+        app.undo()
+        self.assertEqual((app.document.annotations[0].x, app.document.annotations[0].y), (250, 80))
+        app.tool = "arrow"
+        app._canvas_down(point(100, 350))
+        app._canvas_drag(point(200, 350))
+        app._canvas_up(None)
+        self.assertEqual((app.tool, len(app.document.annotations)), ("select", 2))
+        self.assertEqual((app.document.annotations[1].x2, app.document.annotations[1].y2), (200, 350))
+        app.undo()
+        self.assertEqual([item.id for item in app.document.annotations], [label_id])
+
 
 if __name__ == "__main__":
     unittest.main()

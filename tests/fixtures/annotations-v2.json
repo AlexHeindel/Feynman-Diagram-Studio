@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "title": "Annotations across editors",
+  "vertices": [
+    {"id":"left","x":120,"y":230,"label":"","labelX":0,"labelY":32,"visible":true,"marker":"dot","markerSize":22},
+    {"id":"right","x":600,"y":230,"label":"","labelX":0,"labelY":32,"visible":true,"marker":"dot","markerSize":22}
+  ],
+  "edges": [
+    {"id":"curve","from":"left","to":"right","kind":"fermion","label":"e","curvature":100,"labelOffset":-25,"labelX":0,"labelY":0,"arrow":"forward","color":"#172333","bundle":1,"bundleSpacing":14,"loopSize":90,"loopAngle":-90,"circular":false,
+     "momentum":{"label":"p","direction":"forward","side":"right","color":"#172333","start":0.2,"end":0.8}}
+  ],
+  "annotations": [
+    {"id":"free-label","type":"label","x":340,"y":90,"text":"\\Gamma^{(2)}","color":"#172333"},
+    {"id":"free-arrow","type":"arrow","x1":100,"y1":370,"x2":220,"y2":370,"color":"#172333"}
+  ],
+  "style": {"widthMm":120,"strokePt":0.8,"fontPt":10}
+}

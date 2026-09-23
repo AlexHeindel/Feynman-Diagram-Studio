@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
 
-from feynman_studio.latex import FORMATS, latex_source, standalone_source
+from feynman_studio.latex import FORMATS, latex_source, standalone_source, unsupported_features
 from feynman_studio.model import Diagram, Edge, FigureStyle, Vertex, templates
 from feynman_studio.render import save_pdf, save_raster, svg_document
 
@@ -123,7 +123,13 @@ class FeatureOutputTests(unittest.TestCase):
     def test_exported_style_settings_reach_every_dialect(self):
         document = _feature_diagrams()[0]
         for option in FORMATS:
-            source = latex_source(document, option.value)
+            candidate = document.clone()
+            if option.value in ("feynmp", "feynmf"):
+                for edge in candidate.edges:
+                    edge.bundle = 1
+                    if option.value == "feynmf":
+                        edge.color = "#172333"
+            source = latex_source(candidate, option.value)
             self.assertIn(r"\fontsize{12pt}{14.4pt}\selectfont", source)
             if option.value in ("feynmp", "feynmf"):
                 self.assertIn(r"\fmfpen{1.2pt}", source)
@@ -249,10 +255,24 @@ class LatexRenderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="fds-latex-") as temporary:
             for index, document in enumerate(documents):
                 with self.subTest(format=format_name, diagram=document.title):
+                    if unsupported_features(document, format_name):
+                        with self.assertRaises(ValueError):
+                            standalone_source(document, format_name)
+                        continue
                     pdf = self._render(document, format_name, Path(temporary) / str(index))
                     self._assert_visible_and_inside_page(pdf)
                     if index == len(templates()) and format_name != "feynmf":
                         self._assert_colors(pdf)
+
+    def test_version_two_annotations_compile_in_every_format(self):
+        import json
+        fixture = ROOT / "tests" / "fixtures" / "annotations-v2.json"
+        document = Diagram.from_dict(json.loads(fixture.read_text()))
+        with tempfile.TemporaryDirectory(prefix="fds-v2-latex-") as temporary:
+            for option in FORMATS:
+                with self.subTest(format=option.value):
+                    pdf = self._render(document, option.value, Path(temporary) / option.value)
+                    self._assert_visible_and_inside_page(pdf)
 
     def _raster(self, pdf: Path):
         result = subprocess.run([self.binaries["pdftoppm"], "-f", "1", "-l", "1", "-r", "144", "-png", str(pdf)],

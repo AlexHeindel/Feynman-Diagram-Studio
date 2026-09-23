@@ -120,6 +120,48 @@ def edge_label_position(middle: Sample, edge: Edge) -> Tuple[float, float]:
     )
 
 
+def momentum_geometry(a: Vertex, b: Vertex, edge: Edge):
+    momentum = edge.momentum
+    if momentum is None:
+        raise ValueError("This propagator has no momentum annotation.")
+    side = -1 if momentum.side == "left" else 1
+    def sample(t: float) -> Sample:
+        if math.hypot(b.x - a.x, b.y - a.y) < 0.01:
+            return self_loop(a, edge.loopSize, edge.loopAngle, t)
+        if edge.circular:
+            return circular_arc(a, b, edge.curvature or 1, t)
+        return curve(a, b, edge.curvature, t)
+    samples = [sample(i / 200) for i in range(201)]
+    lengths = [0.0]
+    for previous, current in zip(samples, samples[1:]):
+        lengths.append(lengths[-1] + math.hypot(current.x - previous.x, current.y - previous.y))
+    total = lengths[-1]
+    def at(fraction: float) -> Sample:
+        distance = fraction * total
+        i = 1
+        while i < 200 and lengths[i] < distance:
+            i += 1
+        t = (distance - lengths[i - 1]) / (lengths[i] - lengths[i - 1] or 1)
+        previous, current = samples[i - 1], samples[i]
+        x = previous.x + (current.x - previous.x) * t
+        y = previous.y + (current.y - previous.y) * t
+        dx, dy = current.x - previous.x, current.y - previous.y
+        size = math.hypot(dx, dy) or 1
+        tx, ty = dx / size, dy / size
+        nx, ny = -ty, tx
+        return Sample(x + side * nx * 18, y + side * ny * 18, tx, ty, nx, ny)
+    count = max(2, math.ceil((momentum.end - momentum.start) * total / 5))
+    points = [at(momentum.start + (momentum.end - momentum.start) * i / count) for i in range(count + 1)]
+    tip = points[-1] if momentum.direction == "forward" else points[0]
+    sign = 1 if momentum.direction == "forward" else -1
+    arrow = [(tip.x, tip.y),
+             (tip.x - sign * tip.tx * 12 + tip.nx * 5, tip.y - sign * tip.ty * 12 + tip.ny * 5),
+             (tip.x - sign * tip.tx * 12 - tip.nx * 5, tip.y - sign * tip.ty * 12 - tip.ny * 5)]
+    middle = at((momentum.start + momentum.end) / 2)
+    label = (middle.x + side * middle.nx * 16, middle.y + side * middle.ny * 16)
+    return [(p.x, p.y) for p in points], arrow, label
+
+
 def distance_to_polyline(x: float, y: float, points: Sequence[Tuple[float, float]]) -> float:
     best = float("inf")
     for (ax, ay), (bx, by) in zip(points, points[1:]):

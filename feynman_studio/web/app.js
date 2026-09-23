@@ -55,6 +55,20 @@ function vertexById(id) {
 function edgeById(id) {
   return state.document.edges.find((item) => item.id === id) || null;
 }
+function annotationById(id) {
+  return state.document.annotations.find((item) => item.id === id) || null;
+}
+function makeAnnotation(type, x, y) {
+  return type === "label"
+    ? { id: uuid(), type, x, y, text: "label", color: "#172333" }
+    : { id: uuid(), type, x1: x, y1: y, x2: Math.min(700, x + 80), y2: y, color: "#172333" };
+}
+function unsupportedFeatures(documentModel, format) {
+  const reasons = [];
+  if (["feynmp", "feynmf"].includes(format) && documentModel.edges.some((edge) => edge.bundle > 1)) reasons.push("Quark bundle spacing is not preserved");
+  if (format === "feynmf" && (documentModel.edges.some((edge) => edge.color.toUpperCase() !== "#172333" || (edge.momentum && edge.momentum.color.toUpperCase() !== "#172333")) || documentModel.annotations.some((item) => item.color.toUpperCase() !== "#172333"))) reasons.push("Custom colors are not supported by feynMF");
+  return reasons;
+}
 
 function makeVertex(x, y, label = "", visible = true) {
   return {
@@ -162,6 +176,37 @@ function geometry(a, b, edge, laneOffset = 0) {
   });
   const path = (values) => values.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(3)},${point.y.toFixed(3)}`).join(" ");
   return { path: path(points), baseline: path(center), middle: sample(0.5) };
+}
+
+function momentumGeometry(a, b, edge) {
+  const momentum = edge.momentum;
+  const side = momentum.side === "left" ? -1 : 1;
+  const sample = (t) => Math.hypot(b.x - a.x, b.y - a.y) < 0.01
+    ? selfLoop(a, edge.loopSize, edge.loopAngle, t)
+    : edge.circular ? circularArc(a, b, edge.curvature || 1, t) : curve(a, b, edge.curvature, t);
+  const samples = Array.from({ length: 201 }, (_, i) => sample(i / 200));
+  const lengths = [0];
+  for (let i = 1; i < samples.length; i++) lengths.push(lengths[i - 1] + Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y));
+  const total = lengths.at(-1);
+  const at = (fraction) => {
+    const distance = fraction * total;
+    let i = 1;
+    while (i < 200 && lengths[i] < distance) i++;
+    const t = (distance - lengths[i - 1]) / (lengths[i] - lengths[i - 1] || 1);
+    const p = samples[i - 1], q = samples[i];
+    const x = p.x + (q.x - p.x) * t, y = p.y + (q.y - p.y) * t;
+    const dx = q.x - p.x, dy = q.y - p.y, size = Math.hypot(dx, dy) || 1;
+    return { x: x - side * dy / size * 18, y: y + side * dx / size * 18,
+      tx: dx / size, ty: dy / size, nx: -dy / size, ny: dx / size };
+  };
+  const count = Math.max(2, Math.ceil((momentum.end - momentum.start) * total / 5));
+  const points = Array.from({ length: count + 1 }, (_, i) => at(momentum.start + (momentum.end - momentum.start) * i / count));
+  const tip = momentum.direction === "forward" ? points.at(-1) : points[0], sign = momentum.direction === "forward" ? 1 : -1;
+  const arrow = [{ x: tip.x, y: tip.y },
+    { x: tip.x - sign * tip.tx * 12 + tip.nx * 5, y: tip.y - sign * tip.ty * 12 + tip.ny * 5 },
+    { x: tip.x - sign * tip.tx * 12 - tip.nx * 5, y: tip.y - sign * tip.ty * 12 - tip.ny * 5 }];
+  const middle = at((momentum.start + momentum.end) / 2);
+  return { points, arrow, label: { x: middle.x + side * middle.nx * 16, y: middle.y + side * middle.ny * 16 } };
 }
 
 const texWords = {
@@ -294,6 +339,23 @@ function artwork(documentModel) {
       const y = point.y + point.ny * edge.labelOffset + edge.labelY;
       labels.push(`<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="${edge.color}">${svgLabel(edge.label)}</text>`);
     }
+    if (edge.momentum) {
+      const path = momentumGeometry(start, end, edge);
+      paths.push(`<polyline points="${path.points.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="${edge.momentum.color}" stroke-width="${stroke * 0.8}" stroke-linecap="round"/>`);
+      paths.push(`<polygon points="${path.arrow.map((p) => `${p.x},${p.y}`).join(" ")}" fill="${edge.momentum.color}"/>`);
+      if (edge.momentum.label) labels.push(`<text x="${path.label.x}" y="${path.label.y}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="${edge.momentum.color}">${svgLabel(edge.momentum.label)}</text>`);
+    }
+  }
+  for (const item of documentModel.annotations) {
+    if (item.type === "label") {
+      if (item.text) labels.push(`<text x="${item.x}" y="${item.y}" text-anchor="middle" dominant-baseline="central" font-family="serif" font-size="${font}" fill="${item.color}">${svgLabel(item.text)}</text>`);
+    } else {
+      const dx = item.x2 - item.x1, dy = item.y2 - item.y1, size = Math.hypot(dx, dy);
+      if (size < 1) continue;
+      const tx = dx / size, ty = dy / size, nx = -ty, ny = tx;
+      paths.push(`<line x1="${item.x1}" y1="${item.y1}" x2="${item.x2}" y2="${item.y2}" stroke="${item.color}" stroke-width="${stroke}"/>`);
+      paths.push(`<polygon points="${item.x2},${item.y2} ${item.x2 - tx * 12 + nx * 5},${item.y2 - ty * 12 + ny * 5} ${item.x2 - tx * 12 - nx * 5},${item.y2 - ty * 12 - ny * 5}" fill="${item.color}"/>`);
+    }
   }
   for (const vertex of documentModel.vertices) {
     paths.push(markerArtwork(vertex, stroke));
@@ -337,6 +399,14 @@ function renderCanvas() {
     const baseline = geometry(start, end, edge).baseline;
     const id = escapeXml(edge.id);
     edgeHits.push(`<path class="hit hit-edge" data-kind="edge" data-id="${id}" d="${baseline}"/>`);
+    if (edge.momentum) {
+      const path = momentumGeometry(start, end, edge);
+      edgeHits.push(`<polyline class="hit hit-edge" data-kind="edge" data-id="${id}" points="${path.points.map((p) => `${p.x},${p.y}`).join(" ")}"/>`);
+      if (edge.momentum.label) {
+        const width = Math.max(28, displayLabel(edge.momentum.label).length * font * 0.7);
+        labelHits.push(`<rect class="hit hit-label" data-kind="edge" data-id="${id}" x="${path.label.x - width / 2}" y="${path.label.y - font}" width="${width}" height="${font * 2}"/>`);
+      }
+    }
     if (edge.id === state.selected) controls.push(`<path class="edge-selection" d="${baseline}"/>`);
     if (edge.label) {
       const position = labelPosition(edge);
@@ -344,6 +414,16 @@ function renderCanvas() {
       const height = Math.max(22, font * 1.6);
       labelHits.push(`<rect class="hit hit-label" data-kind="edge-label" data-id="${id}" x="${position.x - width / 2}" y="${position.y - height / 2}" width="${width}" height="${height}"/>`);
     }
+  }
+  for (const item of state.document.annotations) {
+    const id = escapeXml(item.id);
+    if (item.type === "label") {
+      const width = Math.max(28, displayLabel(item.text).length * font * 0.7);
+      const height = Math.max(22, font * 1.6);
+      labelHits.push(`<rect class="hit hit-label" data-kind="annotation-label" data-id="${id}" x="${item.x - width / 2}" y="${item.y - height / 2}" width="${width}" height="${height}"/>`);
+    } else edgeHits.push(`<line class="hit hit-edge" data-kind="annotation-arrow" data-id="${id}" x1="${item.x1}" y1="${item.y1}" x2="${item.x2}" y2="${item.y2}"/>`);
+    if (state.tool === "select" && state.selected === item.id)
+      controls.push(`<circle class="handle selected" cx="${item.type === "label" ? item.x : (item.x1 + item.x2) / 2}" cy="${item.type === "label" ? item.y : (item.y1 + item.y2) / 2}" r="5"/>`);
   }
   for (const vertex of state.document.vertices) {
     const id = escapeXml(vertex.id);
@@ -532,6 +612,7 @@ function removeSelected() {
   commit((documentModel) => {
     documentModel.vertices = documentModel.vertices.filter((item) => item.id !== objectId);
     documentModel.edges = documentModel.edges.filter((item) => item.id !== objectId && item.from !== objectId && item.to !== objectId);
+    documentModel.annotations = documentModel.annotations.filter((item) => item.id !== objectId);
   }, "Object deleted");
   state.selected = null;
   state.connectionStart = null;
@@ -570,6 +651,8 @@ function setTool(tool) {
 
 function hintText() {
   if (state.tool === "vertex") return "Click the page to place a vertex.";
+  if (state.tool === "label") return "Click the page to place a free label.";
+  if (state.tool === "arrow") return "Drag on the page to draw a free arrow.";
   if (state.tool === "connect") return state.connectionStart ? "Choose the second vertex." : "Choose two vertices to connect, in the direction of particle flow.";
   if (state.tool === "loop") {
     if (state.loopMode === "single") return "Choose one vertex to attach a loop.";
@@ -587,6 +670,9 @@ function renderLists() {
   });
   state.document.edges.forEach((edge, index) => {
     objects.push(`<button type="button" role="option" data-object="${escapeXml(edge.id)}" aria-selected="${edge.id === state.selected}">${titleCase(edge.kind)} ${index + 1}</button>`);
+  });
+  state.document.annotations.forEach((item, index) => {
+    objects.push(`<button type="button" role="option" data-object="${escapeXml(item.id)}" aria-selected="${item.id === state.selected}">${item.type === "label" ? `Label ${index + 1} · ${htmlLabel(item.text)}` : `Arrow ${index + 1}`}</button>`);
   });
   $("#objects").innerHTML = objects.join("") || '<p class="muted empty-note">No objects yet</p>';
 }
@@ -626,6 +712,7 @@ function renderInspector() {
   }
   const vertex = vertexById(state.selected);
   const edge = edgeById(state.selected);
+  const annotation = annotationById(state.selected);
   if (vertex) {
     html += '<hr><h2>Vertex</h2>';
     html += field("Label (TeX)", "vertex.label", vertex.label, { maxlength: 200 });
@@ -655,7 +742,29 @@ function renderInspector() {
     html += field("Label X", "edge.labelX", niceNumber(edge.labelX), { type: "number", min: -150, max: 150, step: 1 });
     html += field("Label Y", "edge.labelY", niceNumber(edge.labelY), { type: "number", min: -150, max: 150, step: 1 });
     html += `<label class="field">Line color<input data-path="edge.color" type="color" value="${escapeXml(edge.color)}"></label>`;
+    html += `<label class="check"><input data-path="edge.momentumEnabled" type="checkbox"${edge.momentum ? " checked" : ""}> Momentum arrow</label>`;
+    if (edge.momentum) {
+      html += field("Momentum label (TeX)", "momentum.label", edge.momentum.label, { maxlength: 200 });
+      html += choice("Momentum direction", "momentum.direction", edge.momentum.direction, [
+        { value: "forward", label: "Start → end" }, { value: "reverse", label: "End → start" },
+      ]);
+      html += choice("Momentum side", "momentum.side", edge.momentum.side, ["left", "right"]);
+      html += `<details><summary>Fine placement</summary>`;
+      html += field("Start (%)", "momentum.start", niceNumber(edge.momentum.start * 100), { type: "number", min: 0, max: 95, step: 1 });
+      html += field("End (%)", "momentum.end", niceNumber(edge.momentum.end * 100), { type: "number", min: 5, max: 100, step: 1 });
+      html += `<label class="field">Arrow color<input data-path="momentum.color" type="color" value="${escapeXml(edge.momentum.color)}"></label></details>`;
+    }
     html += '<button type="button" class="danger" data-action="delete">Delete propagator</button>';
+  } else if (annotation) {
+    html += `<hr><h2>${annotation.type === "label" ? "Free label" : "Free arrow"}</h2>`;
+    if (annotation.type === "label") {
+      html += field("Label (TeX)", "annotation.text", annotation.text, { maxlength: 200 });
+      html += field("X position", "annotation.x", niceNumber(annotation.x), { type: "number", min: 0, max: 720, step: 1 });
+      html += field("Y position", "annotation.y", niceNumber(annotation.y), { type: "number", min: 0, max: 480, step: 1 });
+    } else for (const coordinate of ["x1", "y1", "x2", "y2"])
+      html += field(coordinate.toUpperCase(), `annotation.${coordinate}`, niceNumber(annotation[coordinate]), { type: "number", min: 0, max: coordinate.startsWith("x") ? 720 : 480, step: 1 });
+    html += `<label class="field">Color<input data-path="annotation.color" type="color" value="${escapeXml(annotation.color)}"></label>`;
+    html += '<button type="button" class="danger" data-action="delete">Delete annotation</button>';
   }
   inspector.innerHTML = html;
 }
@@ -666,7 +775,7 @@ function renderAll() {
   renderLists();
   renderInspector();
   $("#diagram-title").textContent = state.document.title;
-  $("#object-count").textContent = `${state.document.vertices.length} vertices · ${state.document.edges.length} propagators`;
+  $("#object-count").textContent = `${state.document.vertices.length} vertices · ${state.document.edges.length} propagators · ${state.document.annotations.length} annotations`;
   $("#hint").textContent = hintText();
   $("#undo").disabled = state.past.length === 0;
   $("#redo").disabled = state.future.length === 0;
@@ -732,10 +841,11 @@ async function openProject(file) {
 
 function blankDiagram() {
   return {
-    version: 1,
+    version: 2,
     title: "Untitled diagram",
     vertices: [],
     edges: [],
+    annotations: [],
     style: { widthMm: 120, strokePt: 0.8, fontPt: 10 },
   };
 }
@@ -779,9 +889,24 @@ async function exportDiagram() {
 
 async function refreshLatex() {
   const area = $("#latex-source");
+  const format = $("#latex-format").value;
+  const reasons = unsupportedFeatures(state.document, format);
+  const blocked = state.latexFormats.flatMap((item) => {
+    const issues = unsupportedFeatures(state.document, item.value);
+    return issues.length ? [`${item.label}: ${issues.join("; ")}`] : [];
+  });
+  $("#latex-compat").textContent = blocked.length ? `Unavailable for this diagram: ${blocked.join(" · ")}` : "All six formats are available for this diagram.";
+  $("#copy-latex").disabled = reasons.length > 0;
+  $("#copy-standalone").disabled = reasons.length > 0;
+  if (reasons.length) {
+    area.value = "";
+    state.latexSource = "";
+    state.standaloneSource = "";
+    return;
+  }
   area.value = "Generating source…";
   try {
-    const response = await api("/api/latex", { diagram: state.document, format: $("#latex-format").value });
+    const response = await api("/api/latex", { diagram: state.document, format });
     const result = await response.json();
     state.latexSource = result.source;
     state.standaloneSource = result.standalone;
@@ -793,6 +918,13 @@ async function refreshLatex() {
 }
 
 async function openLatexDialog() {
+  const formatSelect = $("#latex-format");
+  for (const option of formatSelect.options) {
+    const reasons = unsupportedFeatures(state.document, option.value);
+    option.disabled = reasons.length > 0;
+    option.title = reasons.join("; ");
+  }
+  if (formatSelect.selectedOptions[0]?.disabled) formatSelect.value = [...formatSelect.options].find((option) => !option.disabled)?.value || "tikz-feynman";
   $("#latex-dialog").showModal();
   await refreshLatex();
 }
@@ -923,6 +1055,24 @@ function canvasDown(event) {
   const target = event.target.closest("[data-kind]");
   const kind = target?.dataset.kind || null;
   const id = target?.dataset.id || null;
+  if (state.tool === "label" || state.tool === "arrow") {
+    if (state.document.annotations.length >= 300) { notify("A project may contain at most 300 annotations."); return; }
+    const item = makeAnnotation(state.tool, clamp(point.x, 20, 700), clamp(point.y, 20, 460));
+    const before = clone(state.document);
+    state.document.annotations.push(item);
+    state.selected = item.id;
+    if (item.type === "arrow") {
+      item.x2 = item.x1;
+      item.y2 = item.y1;
+      state.drag = { kind: "new-arrow", id: item.id, before, origin: point, changed: true };
+      $("#diagram-canvas").setPointerCapture(event.pointerId);
+      renderAll();
+    } else {
+      state.tool = "select";
+      record(before, "Label added");
+    }
+    return;
+  }
   if (state.tool === "vertex") {
     if (state.document.vertices.length >= 150) {
       notify("A project may contain at most 150 vertices.");
@@ -991,6 +1141,18 @@ function canvasMove(event) {
       edge.labelX = clamp(edge.labelX + dx, -150, 150);
       edge.labelY = clamp(edge.labelY + dy, -150, 150);
     }
+  } else if (drag.kind === "annotation-label") {
+    const item = annotationById(drag.id);
+    if (item) { item.x = clamp(item.x + dx, 20, 700); item.y = clamp(item.y + dy, 20, 460); }
+  } else if (drag.kind === "annotation-arrow") {
+    const item = annotationById(drag.id);
+    if (item) {
+      item.x1 = clamp(item.x1 + dx, 20, 700); item.y1 = clamp(item.y1 + dy, 20, 460);
+      item.x2 = clamp(item.x2 + dx, 20, 700); item.y2 = clamp(item.y2 + dy, 20, 460);
+    }
+  } else if (drag.kind === "new-arrow") {
+    const item = annotationById(drag.id);
+    if (item) { item.x2 = clamp(point.x, 20, 700); item.y2 = clamp(point.y, 20, 460); }
   }
   drag.origin = point;
   drag.changed = true;
@@ -1002,6 +1164,7 @@ function canvasUp(event) {
   if (!drag) return;
   if ($("#diagram-canvas").hasPointerCapture(event.pointerId)) $("#diagram-canvas").releasePointerCapture(event.pointerId);
   state.drag = null;
+  if (drag.kind === "new-arrow") state.tool = "select";
   if (drag.changed) record(drag.before, "Object moved");
 }
 
@@ -1028,8 +1191,13 @@ function inspectorChanged(input) {
     renderAll();
     return;
   }
+  if (path === "edge.momentumEnabled") {
+    const edge = edgeById(state.selected);
+    if (edge) commit(() => { edge.momentum = input.checked ? { label: "", direction: "forward", side: edge.labelOffset < 0 ? "right" : "left", color: edge.color, start: 0.2, end: 0.8 } : null; }, "Momentum annotation changed");
+    return;
+  }
   const [scope, attribute] = path.split(".");
-  const target = scope === "style" ? state.document.style : scope === "vertex" ? vertexById(state.selected) : edgeById(state.selected);
+  const target = scope === "style" ? state.document.style : scope === "vertex" ? vertexById(state.selected) : scope === "annotation" ? annotationById(state.selected) : scope === "momentum" ? edgeById(state.selected)?.momentum : edgeById(state.selected);
   if (!target) return;
   let value = input.value;
   if (input.type === "number") {
@@ -1041,8 +1209,13 @@ function inspectorChanged(input) {
     }
   }
   if (attribute === "bundle") value = Number(value);
+  if (scope === "momentum" && (attribute === "start" || attribute === "end")) value /= 100;
   commit(() => {
     target[attribute] = value;
+    if (scope === "momentum") {
+      if (attribute === "start") target.end = Math.max(target.end, Math.min(1, value + 0.05));
+      if (attribute === "end") target.start = Math.min(target.start, Math.max(0, value - 0.05));
+    }
     if (scope === "vertex" && attribute === "marker") target.visible = value !== "none";
   });
 }
@@ -1058,7 +1231,7 @@ function bindEvents() {
     const action = event.target.closest("[data-action]");
     if (action) { runAction(action.dataset.action); return; }
     const tool = event.target.closest("[data-tool]");
-    if (tool) { closeMenus(); setTool(tool.dataset.tool); return; }
+    if (tool) { closeMenus(); $(".annotation-tools")?.removeAttribute("open"); setTool(tool.dataset.tool); return; }
     const template = event.target.closest("[data-template]");
     if (template) { replaceDocument(state.templates[Number(template.dataset.template)], "Template loaded"); return; }
     const object = event.target.closest("[data-object]");

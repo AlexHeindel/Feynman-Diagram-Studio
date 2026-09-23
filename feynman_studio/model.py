@@ -13,6 +13,7 @@ GRID_SIZE = 20.0
 KINDS = ("fermion", "photon", "gluon", "scalar", "ghost")
 MARKERS = ("none", "dot", "open", "filled", "hatched", "crosshatched", "dotted")
 ARROWS = ("forward", "reverse", "none")
+ANNOTATION_TYPES = ("label", "arrow")
 
 
 class DiagramError(ValueError):
@@ -33,6 +34,40 @@ class Vertex:
 
 
 @dataclass
+class Momentum:
+    label: str = ""
+    direction: str = "forward"
+    side: str = "right"
+    color: str = "#172333"
+    start: float = 0.2
+    end: float = 0.8
+
+
+@dataclass
+class FreeLabel:
+    id: str
+    x: float
+    y: float
+    text: str = "label"
+    color: str = "#172333"
+    type: str = "label"
+
+
+@dataclass
+class FreeArrow:
+    id: str
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    color: str = "#172333"
+    type: str = "arrow"
+
+
+Annotation = FreeLabel | FreeArrow
+
+
+@dataclass
 class Edge:
     id: str
     from_: str
@@ -50,10 +85,13 @@ class Edge:
     loopSize: float = 90.0
     loopAngle: float = -90.0
     circular: bool = False
+    momentum: Momentum | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["from"] = data.pop("from_")
+        if data["momentum"] is None:
+            data.pop("momentum")
         return data
 
 
@@ -66,11 +104,12 @@ class FigureStyle:
 
 @dataclass
 class Diagram:
-    version: int = 1
+    version: int = 2
     title: str = "Untitled diagram"
     vertices: List[Vertex] = field(default_factory=list)
     edges: List[Edge] = field(default_factory=list)
     style: FigureStyle = field(default_factory=FigureStyle)
+    annotations: List[Annotation] = field(default_factory=list)
 
     def clone(self) -> "Diagram":
         return copy.deepcopy(self)
@@ -81,6 +120,7 @@ class Diagram:
             "title": self.title,
             "vertices": [asdict(vertex) for vertex in self.vertices],
             "edges": [edge.to_dict() for edge in self.edges],
+            "annotations": [asdict(item) for item in self.annotations],
             "style": asdict(self.style),
         }
 
@@ -89,8 +129,8 @@ class Diagram:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Diagram":
-        if not isinstance(data, dict) or data.get("version") != 1:
-            raise DiagramError("This is not a valid Feynman Diagram Studio version 1 project.")
+        if not isinstance(data, dict) or data.get("version") not in (1, 2):
+            raise DiagramError("This is not a valid Feynman Diagram Studio version 1 or 2 project.")
         title = data.get("title")
         if not isinstance(title, str) or not 1 <= len(title) <= 100:
             raise DiagramError("The diagram title must contain 1–100 characters.")
@@ -101,6 +141,9 @@ class Diagram:
             raise DiagramError("A project may contain at most 150 vertices.")
         if not isinstance(raw_edges, list) or len(raw_edges) > 300:
             raise DiagramError("A project may contain at most 300 propagators.")
+        raw_annotations = [] if data["version"] == 1 else data.get("annotations")
+        if not isinstance(raw_annotations, list) or len(raw_annotations) > 300:
+            raise DiagramError("A project may contain at most 300 annotations.")
         if not isinstance(raw_style, dict):
             raise DiagramError("The figure style is missing.")
 
@@ -144,6 +187,7 @@ class Diagram:
                 loopSize=_number(raw, "loopSize", 30, 180, 90),
                 loopAngle=_number(raw, "loopAngle", -180, 180, -90),
                 circular=raw.get("circular", False),
+                momentum=_parse_momentum(raw["momentum"]) if data["version"] == 2 and "momentum" in raw else None,
             )
             if edge.kind not in KINDS or edge.arrow not in ARROWS:
                 raise DiagramError("A propagator uses an unsupported style.")
@@ -153,19 +197,34 @@ class Diagram:
                 raise DiagramError("A propagator has invalid loop settings.")
             edges.append(edge)
 
+        annotations: List[Annotation] = []
+        for raw in raw_annotations:
+            if not isinstance(raw, dict):
+                raise DiagramError("Every annotation must be an object.")
+            annotation_id = _text(raw, "id", 1, 80)
+            color = raw.get("color")
+            if not _valid_color(color):
+                raise DiagramError("An annotation has an invalid color.")
+            if raw.get("type") == "label":
+                annotations.append(FreeLabel(annotation_id, _number(raw, "x", 0, 720), _number(raw, "y", 0, 480), _text(raw, "text", 0, 200), color))
+            elif raw.get("type") == "arrow":
+                annotations.append(FreeArrow(annotation_id, _number(raw, "x1", 0, 720), _number(raw, "y1", 0, 480), _number(raw, "x2", 0, 720), _number(raw, "y2", 0, 480), color))
+            else:
+                raise DiagramError("An annotation uses an unsupported type.")
+
         style = FigureStyle(
             widthMm=_number(raw_style, "widthMm", 60, 240),
             strokePt=_number(raw_style, "strokePt", 0.3, 2),
             fontPt=_number(raw_style, "fontPt", 5, 18),
         )
-        ids = [item.id for item in vertices] + [item.id for item in edges]
+        ids = [item.id for item in vertices] + [item.id for item in edges] + [item.id for item in annotations]
         if len(ids) != len(set(ids)):
             raise DiagramError("Object IDs must be unique.")
         vertex_ids = {item.id for item in vertices}
         if any(item.from_ not in vertex_ids or item.to not in vertex_ids for item in edges):
             raise DiagramError("Every propagator must connect existing vertices.")
 
-        document = cls(1, title, vertices, edges, style)
+        document = cls(2, title, vertices, edges, style, annotations)
         _migrate_circular_loops(document)
         return document
 
@@ -183,6 +242,9 @@ class Diagram:
     def edge(self, object_id: str) -> Edge | None:
         return next((item for item in self.edges if item.id == object_id), None)
 
+    def annotation(self, object_id: str) -> Annotation | None:
+        return next((item for item in self.annotations if item.id == object_id), None)
+
     def remove(self, object_id: str) -> None:
         self.vertices = [item for item in self.vertices if item.id != object_id]
         self.edges = [
@@ -190,6 +252,7 @@ class Diagram:
             for item in self.edges
             if item.id != object_id and item.from_ != object_id and item.to != object_id
         ]
+        self.annotations = [item for item in self.annotations if item.id != object_id]
 
 
 def _text(data: Dict[str, Any], key: str, minimum: int, maximum: int) -> str:
@@ -222,6 +285,26 @@ def _valid_color(value: Any) -> bool:
     if not isinstance(value, str) or len(value) != 7 or value[0] != "#":
         return False
     return all(character in "0123456789abcdefABCDEF" for character in value[1:])
+
+
+def _parse_momentum(raw: Any) -> Momentum:
+    if not isinstance(raw, dict):
+        raise DiagramError("Invalid momentum annotation.")
+    item = Momentum(
+        label=_text(raw, "label", 0, 200),
+        direction=raw.get("direction", ""),
+        side=raw.get("side", ""),
+        color=raw.get("color", ""),
+        start=_number(raw, "start", 0, 0.95),
+        end=_number(raw, "end", 0.05, 1),
+    )
+    if item.direction not in ("forward", "reverse") or item.side not in ("left", "right") or not _valid_color(item.color) or item.end - item.start < 0.05:
+        raise DiagramError("Invalid momentum annotation.")
+    return item
+
+
+def make_annotation(kind: str, x: float, y: float) -> Annotation:
+    return FreeLabel(str(uuid.uuid4()), x, y) if kind == "label" else FreeArrow(str(uuid.uuid4()), x, y, min(700, x + 80), y)
 
 
 def make_vertex(x: float, y: float, label: str = "", visible: bool = False) -> Vertex:
