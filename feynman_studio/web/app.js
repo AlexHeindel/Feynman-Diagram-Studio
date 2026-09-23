@@ -698,6 +698,8 @@ function choice(label, path, value, options) {
 
 function renderInspector() {
   const inspector = $("#inspector");
+  const context = `${state.tool}:${state.selected || ""}`;
+  const fineOpen = inspector.dataset.objectId === context && inspector.querySelector("details")?.open;
   const documentModel = state.document;
   let html = '<h2>Inspector</h2><hr><h2>Figure style</h2>';
   html += field("Figure width (mm)", "style.widthMm", niceNumber(documentModel.style.widthMm), { type: "number", min: 60, max: 240, step: 1 });
@@ -767,6 +769,9 @@ function renderInspector() {
     html += '<button type="button" class="danger" data-action="delete">Delete annotation</button>';
   }
   inspector.innerHTML = html;
+  inspector.dataset.objectId = context;
+  const fine = inspector.querySelector("details");
+  if (fine) fine.open = fineOpen;
 }
 
 function renderAll() {

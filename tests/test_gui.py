@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from feynman_studio.app import StudioApp, check_tk_version
-from feynman_studio.model import KINDS, blank_diagram, make_edge, make_vertex
+from feynman_studio.model import KINDS, Momentum, blank_diagram, make_edge, make_vertex
 
 
 class GuiSmokeTests(unittest.TestCase):
@@ -86,6 +86,17 @@ class GuiSmokeTests(unittest.TestCase):
                 app._rebuild_inspector()
                 labels = [widget.cget("text") for widget in app.inspector.winfo_children() if isinstance(widget, ttk.Label)]
                 self.assertEqual(labels[:2], ["Inspector", "Figure style"])
+            edge = app.document.edges[0]
+            edge.momentum = Momentum()
+            app._rebuild_inspector()
+            fine_button = next(widget for widget in app.inspector.winfo_children()
+                               if isinstance(widget, ttk.Button) and widget.cget("text") == "Fine placement…")
+            fine_button.invoke()
+            self.assertTrue(app._fine_placement_frame.winfo_manager())
+            app._set_momentum_fraction(edge.id, "start", 25)
+            self.assertTrue(app._fine_placement_frame.winfo_manager())
+            app._set_momentum_fraction(edge.id, "end", 75)
+            self.assertTrue(app._fine_placement_frame.winfo_manager())
             app.selected = None
             app.set_tool("connect")
             self.assertEqual(app.tool, "connect")

@@ -938,8 +938,12 @@ class StudioApp:
     def _rebuild_inspector(self) -> None:
         if not hasattr(self, "inspector"):
             return
+        fine = getattr(self, "_fine_placement_frame", None)
+        fine_open = (fine is not None and fine.winfo_exists() and fine.winfo_manager()
+                     and getattr(self, "_fine_placement_edge_id", None) == self.selected)
         for child in self.inspector.winfo_children():
             child.destroy()
+        self._fine_placement_frame = None
         ttk.Label(self.inspector, text="Inspector", style="Heading.TLabel").pack(anchor="w")
         self._section("Figure style")
         self._entry("Figure width (mm)", _clean_number(self.document.style.widthMm), self._number_callback(lambda value: self.commit(lambda document: setattr(document.style, "widthMm", value)), 60, 240))
@@ -995,6 +999,8 @@ class StudioApp:
                 self._choice("Momentum direction", momentum.direction.title(), ("Forward", "Reverse"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "direction", value.lower())))
                 self._choice("Momentum side", momentum.side.title(), ("Left", "Right"), lambda value: self.commit(lambda document: setattr(document.edge(edge.id).momentum, "side", value.lower())))
                 fine = ttk.Frame(self.inspector)
+                self._fine_placement_frame = fine
+                self._fine_placement_edge_id = edge.id
                 def toggle_fine():
                     if fine.winfo_manager():
                         fine.pack_forget()
@@ -1004,6 +1010,8 @@ class StudioApp:
                 for label, attribute, minimum, maximum in (("Start (%)", "start", 0, 95), ("End (%)", "end", 5, 100)):
                     self._entry(label, _clean_number(getattr(momentum, attribute) * 100), self._number_callback(lambda value, attr=attribute: self._set_momentum_fraction(edge.id, attr, value), minimum, maximum), fine)
                 ttk.Button(fine, text="Arrow color…", command=lambda: self._choose_color("momentum", edge.id)).pack(fill="x", pady=(5, 0))
+                if fine_open:
+                    fine.pack(fill="x")
             ttk.Button(self.inspector, text="Delete propagator", command=self.remove_selected).pack(fill="x", pady=(6, 0))
         elif annotation:
             self._section("Free label" if isinstance(annotation, FreeLabel) else "Free arrow")
