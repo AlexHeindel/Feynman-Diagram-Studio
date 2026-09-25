@@ -51,6 +51,7 @@ class WebAppTests(unittest.TestCase):
         status, _headers, body = self.request("GET", "/api/bootstrap")
         self.assertEqual(status, 200)
         bootstrap = json.loads(body)
+        self.assertEqual(bootstrap["version"], "1.0.1")
         self.assertEqual(len(bootstrap["templates"]), 13)
         self.assertEqual(len(bootstrap["latexFormats"]), 6)
         self.assertEqual(bootstrap["token"], self.server.token)

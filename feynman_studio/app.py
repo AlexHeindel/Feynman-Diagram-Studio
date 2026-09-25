@@ -920,10 +920,7 @@ class StudioApp:
             item.marker = self.new_marker
             item.visible = self.new_marker != "none"
             item.markerSize = self.new_marker_size
-            self.tool = "select"
-            self.selected = item.id
             self.commit(lambda document: document.vertices.append(item), "Vertex added")
-            self._update_tool_buttons()
             return
         vertex = self._nearest_vertex(x, y)
         if self.tool == "connect" and vertex:
@@ -1150,7 +1147,7 @@ class StudioApp:
             ttk.Button(self.inspector, text="Delete vertex", command=self.remove_selected).pack(fill="x", pady=(8, 0))
         elif edge:
             self._section("Propagator")
-            self._choice("Particle style", edge.kind.title(), [kind.title() for kind in KINDS], lambda value: self.commit(lambda document: setattr(document.edge(edge.id), "kind", value.lower())))
+            self._choice("Particle style", edge.kind.title(), [kind.title() for kind in KINDS], lambda value: self.commit(lambda document: self._set_edge_kind(document.edge(edge.id), value.lower())))
             self._entry("Label (TeX)", edge.label, lambda value: self.commit(lambda document: setattr(document.edge(edge.id), "label", value)))
             arrow_labels = {"forward": "Start → end", "reverse": "End → start", "none": "No arrow"}
             reverse_arrow_labels = {value: key for key, value in arrow_labels.items()}
@@ -1234,6 +1231,11 @@ class StudioApp:
         self.loop_mode = "single" if value == "Single vertex" else "double"
         self.connection_start = None
         self.redraw()
+
+    @staticmethod
+    def _set_edge_kind(edge: Edge, kind: str) -> None:
+        edge.kind = kind
+        edge.arrow = "forward" if kind == "fermion" else "none"
 
     @staticmethod
     def _set_marker(vertex: Vertex, marker: str) -> None:

@@ -13,7 +13,7 @@ from feynman_studio.model import KINDS, Momentum, blank_diagram, make_edge, make
 
 
 class GuiSmokeTests(unittest.TestCase):
-    def test_vertex_tool_switches_to_select_and_new_style_settings_apply(self):
+    def test_vertex_tool_stays_active_and_new_style_settings_apply(self):
         app = StudioApp.__new__(StudioApp)
         app.document = blank_diagram()
         app.past, app.future = [], []
@@ -28,12 +28,11 @@ class GuiSmokeTests(unittest.TestCase):
         app._changed = app.redraw = app._update_tool_buttons = lambda: None
         point = lambda x, y: SimpleNamespace(x=x, y=y)
         app._canvas_down(point(100, 100))
-        self.assertEqual(app.tool, "select")
-        self.assertEqual(app.selected, app.document.vertices[0].id)
-        app.tool = "vertex"
+        self.assertEqual(app.tool, "vertex")
+        self.assertIsNone(app.selected)
         app._canvas_down(point(200, 100))
-        self.assertEqual(app.tool, "select")
-        self.assertEqual(app.selected, app.document.vertices[1].id)
+        self.assertEqual(app.tool, "vertex")
+        self.assertIsNone(app.selected)
         self.assertEqual([(item.marker, item.markerSize) for item in app.document.vertices],
                          [("hatched", 30), ("hatched", 30)])
         app.tool = "connect"
@@ -42,6 +41,17 @@ class GuiSmokeTests(unittest.TestCase):
         app._canvas_down(point(200, 100))
         self.assertEqual(app.document.edges[0].arrow, "reverse")
         self.assertIsNone(app.selected)
+
+    def test_line_type_change_sets_arrow_default_and_keeps_arrow_editable(self):
+        edge = make_edge("start", "end")
+        self.assertEqual(edge.arrow, "forward")
+        for kind in KINDS[1:]:
+            StudioApp._set_edge_kind(edge, kind)
+            self.assertEqual(edge.arrow, "none")
+            edge.arrow = "reverse"
+            self.assertEqual(edge.arrow, "reverse")
+        StudioApp._set_edge_kind(edge, "fermion")
+        self.assertEqual(edge.arrow, "forward")
 
     def test_local_project_list_restores_and_falls_back_to_latest_draft(self):
         with tempfile.TemporaryDirectory() as directory:

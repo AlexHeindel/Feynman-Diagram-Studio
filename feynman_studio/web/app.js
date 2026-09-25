@@ -1250,8 +1250,6 @@ function canvasDown(event) {
     newVertex.markerSize = state.newMarkerSize;
     const before = clone(state.document);
     state.document.vertices.push(newVertex);
-    state.tool = "select";
-    state.selected = newVertex.id;
     record(before, "Vertex added");
     return;
   }
@@ -1391,6 +1389,7 @@ function inspectorChanged(input) {
   if (scope === "momentum" && (attribute === "start" || attribute === "end")) value /= 100;
   commit(() => {
     target[attribute] = value;
+    if (scope === "edge" && attribute === "kind") target.arrow = value === "fermion" ? "forward" : "none";
     if (scope === "momentum") {
       if (attribute === "start") target.end = Math.max(target.end, Math.min(1, value + 0.05));
       if (attribute === "end") target.start = Math.min(target.start, Math.max(0, value - 0.05));
