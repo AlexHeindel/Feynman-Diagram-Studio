@@ -141,6 +141,41 @@ class LatexImportTests(unittest.TestCase):
         with self.assertRaisesRegex(DiagramError, "unknown or circular"):
             import_tikz_feynman(source)
 
+    def test_overleaf_triangular_loop_and_layout_edge(self):
+        source = r"""\feynmandiagram [small, horizontal=a to t1] {
+          a [particle=\(\pi^{0}\)] -- [scalar] t1 -- t2 -- t3 -- t1,
+          t2 -- [photon] p1 [particle=\(\gamma\)],
+          t3 -- [photon] p2 [particle=\(\gamma\)],
+          p1 -- [opacity=0.2] p2,
+        };"""
+        diagram = import_tikz_feynman(source)
+        a, t1, t2, t3, p1, p2 = diagram.vertices
+        self.assertEqual((len(diagram.vertices), len(diagram.edges)), (6, 7))
+        self.assertLess(a.x, t1.x)
+        self.assertLess(t1.x, t2.x)
+        self.assertEqual(t2.x, t3.x)
+        self.assertEqual(p1.x, p2.x)
+        self.assertLess(t2.x, p1.x)
+        self.assertEqual((p1.y, p2.y), (t2.y, t3.y))
+        self.assertLess(p1.y, p2.y)
+        self.assertEqual(diagram.edges[-1].color, "#CCCCCC")
+        self.assertEqual([diagram.edges[index].kind for index in (0, 4, 5)], ["scalar", "photon", "photon"])
+        self.assertEqual(Diagram.from_json(diagram.to_json()), diagram)
+
+        without_constraint = source.replace("          p1 -- [opacity=0.2] p2,\n", "")
+        open_diagram = import_tikz_feynman(without_constraint)
+        _, open_t1, open_t2, open_t3, open_p1, open_p2 = open_diagram.vertices
+        self.assertEqual(len(open_diagram.edges), 6)
+        self.assertEqual(open_p1.x, open_p2.x)
+        self.assertLess(open_p1.y, open_t2.y)
+        self.assertLess(open_t2.y, open_t1.y)
+        self.assertLess(open_t1.y, open_t3.y)
+        self.assertLess(open_t3.y, open_p2.y)
+
+        invisible = import_tikz_feynman(source.replace("opacity=0.2", "draw=none"))
+        self.assertEqual(len(invisible.edges), 6)
+        self.assertEqual((invisible.vertices[4].x, invisible.vertices[4].y), (p1.x, p1.y))
+
 
 if __name__ == "__main__":
     unittest.main()

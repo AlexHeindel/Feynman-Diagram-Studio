@@ -175,6 +175,40 @@ def _horizontal_tree(names: dict[str, object], links: list[tuple[str, str, dict[
     return points if len(points) == len(names) else None
 
 
+def _triangle_loop(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], anchors: tuple[str, str]) -> dict[str, tuple[float, float]] | None:
+    # ponytail: common anchored triangle only; use a graph layout engine for arbitrary cycles.
+    if len(names) != 6 or len(links) not in (6, 7):
+        return None
+    left, center = anchors
+    pairs = {frozenset((start, end)) for start, end, _ in links}
+    pair = lambda first, second: frozenset((first, second))
+    if pair(left, center) not in pairs or len(pairs) != len(links):
+        return None
+    neighbors = [end if start == center else start for start, end, _ in links
+                 if center in (start, end) and left not in (start, end)]
+    if len(neighbors) != 2 or pair(*neighbors) not in pairs:
+        return None
+    upper, lower = neighbors
+
+    def photon_end(name: str) -> str | None:
+        matches = [end if start == name else start for start, end, options in links
+                   if name in (start, end) and "photon" in options]
+        return matches[0] if len(matches) == 1 else None
+
+    upper_end, lower_end = photon_end(upper), photon_end(lower)
+    if not upper_end or not lower_end or len({left, center, upper, lower, upper_end, lower_end}) != 6:
+        return None
+    required = {pair(left, center), pair(center, upper), pair(upper, lower), pair(lower, center),
+                pair(upper, upper_end), pair(lower, lower_end)}
+    connector = pair(upper_end, lower_end)
+    if not required <= pairs or pairs - required not in (set(), {connector}):
+        return None
+    tied = connector in pairs
+    return {left: (0, 0), center: (1, 0), upper: (2, 1), lower: (2, -1),
+            upper_end: (3 if tied else 2.2, 1 if tied else 2),
+            lower_end: (3 if tied else 2.2, -1 if tied else -2)}
+
+
 def _layered_tree(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], root: str) -> dict[str, tuple[float, float]] | None:
     if root not in names or len(links) != len(names) - 1:
         return None
@@ -204,7 +238,10 @@ def _layered_tree(names: dict[str, object], links: list[tuple[str, str, dict[str
 
 
 def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]], horizontal: tuple[str, str] | None, layered: bool) -> dict[str, tuple[float, float]]:
-    anchored = (_layered_tree(names, links, horizontal[0]) if layered else _horizontal_tree(names, links, horizontal)) if horizontal and not explicit else None
+    anchored = None
+    if horizontal and not explicit:
+        anchored = (_layered_tree(names, links, horizontal[0]) if layered else
+                    _triangle_loop(names, links, horizontal) or _horizontal_tree(names, links, horizontal))
     if anchored is not None:
         points = anchored
     else:
@@ -336,6 +373,8 @@ def import_tikz_feynman(source: str) -> Diagram:
         vertices[name] = vertex
         diagram.vertices.append(vertex)
     for start, end, options in links:
+        if options.get("draw") == "none":
+            continue
         style = next((key for key in ("anti fermion", "fermion", "photon", "boson", "gluon", "charged scalar", "anti charged scalar", "scalar", "ghost") if key in options), "fermion")
         kind = "photon" if style == "boson" else style.replace("anti ", "").replace("charged ", "")
         edge = make_edge(vertices[start].id, vertices[end].id, kind)
