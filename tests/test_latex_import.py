@@ -85,6 +85,62 @@ class LatexImportTests(unittest.TestCase):
         self.assertEqual((photon.momentum.label, photon.momentum.color, photon.momentum.side), ("k", "#FF0000", "right"))
         self.assertEqual(diagram.edges[1].color, "#CCCCCC")
 
+    def test_overleaf_layered_muon_decay(self):
+        source = r"""\feynmandiagram [layered layout, horizontal=a to b] {
+          a [particle=\(\mu^{-}\)] -- [fermion] b -- [fermion] f1 [particle=\(\nu_{\mu}\)],
+          b -- [boson, edge label'=\(W^{-}\)] c,
+          c -- [anti fermion] f2 [particle=\(\overline \nu_{e}\)],
+          c -- [fermion] f3 [particle=\(e^{-}\)],
+        };"""
+        diagram = import_tikz_feynman(source)
+        a, b, f1, c, f2, f3 = diagram.vertices
+        self.assertLess(a.x, b.x)
+        self.assertEqual(b.y, a.y)
+        self.assertLess(f1.y, b.y)
+        self.assertEqual(f1.x, c.x)
+        self.assertGreater(c.y, b.y)
+        self.assertEqual(f2.x, f3.x)
+        self.assertLess(f2.y, c.y)
+        self.assertGreater(f3.y, c.y)
+        self.assertEqual(display_label(f2.label), "ν̄_e")
+        self.assertEqual((diagram.edges[2].kind, diagram.edges[2].label), ("photon", "W^{-}"))
+        self.assertEqual(diagram.edges[3].arrow, "reverse")
+
+    def test_overleaf_relative_muon_decay(self):
+        source = r"""\begin{tikzpicture}
+          \begin{feynman}
+            \vertex (a) {\(\mu^{-}\)};
+            \vertex [right=of a] (b);
+            \vertex [above right=of b] (f1) {\(\nu_{\mu}\)};
+            \vertex [below right=of b] (c);
+            \vertex [above right=of c] (f2) {\(\overline \nu_{e}\)};
+            \vertex [below right=of c] (f3) {\(e^{-}\)};
+            \diagram* {
+              (a) -- [fermion] (b) -- [fermion] (f1),
+              (b) -- [boson, edge label'=\(W^{-}\)] (c),
+              (c) -- [anti fermion] (f2),
+              (c) -- [fermion] (f3),
+            };
+          \end{feynman}
+        \end{tikzpicture}"""
+        diagram = import_tikz_feynman(source)
+        a, b, f1, c, f2, f3 = diagram.vertices
+        self.assertLess(a.x, b.x)
+        self.assertEqual(a.y, b.y)
+        self.assertLess(f1.y, b.y)
+        self.assertGreater(c.y, b.y)
+        self.assertEqual(f1.x, c.x)
+        self.assertEqual(f2.y, b.y)
+        self.assertGreater(f3.y, c.y)
+        self.assertEqual(display_label(f2.label), "ν̄_e")
+        self.assertEqual(diagram.edges[2].kind, "photon")
+        self.assertEqual(Diagram.from_json(diagram.to_json()), diagram)
+
+    def test_unresolved_relative_vertex_is_rejected(self):
+        source = r"\vertex [right=of missing] (a); \diagram* { (a) -- [fermion] (b) };"
+        with self.assertRaisesRegex(DiagramError, "unknown or circular"):
+            import_tikz_feynman(source)
+
 
 if __name__ == "__main__":
     unittest.main()

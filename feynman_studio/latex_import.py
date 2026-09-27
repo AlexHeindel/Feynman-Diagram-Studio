@@ -63,10 +63,10 @@ def _options(source: str) -> dict[str, str]:
 def _label(source: str) -> str:
     value = source.strip().strip("{}")
     if value.startswith("$") and value.endswith("$"):
-        return value[1:-1]
-    if value.startswith(r"\(") and value.endswith(r"\)"):
-        return value[2:-2]
-    return value
+        value = value[1:-1]
+    elif value.startswith(r"\(") and value.endswith(r"\)"):
+        value = value[2:-2]
+    return re.sub(r"\\(?:bar|overline)\s+(\\[A-Za-z]+|[A-Za-z])", lambda match: r"\overline{" + match.group(1) + "}", value)
 
 
 def _color(options: dict[str, str], default: str = "#000000") -> str:
@@ -175,8 +175,36 @@ def _horizontal_tree(names: dict[str, object], links: list[tuple[str, str, dict[
     return points if len(points) == len(names) else None
 
 
-def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]], horizontal: tuple[str, str] | None) -> dict[str, tuple[float, float]]:
-    anchored = _horizontal_tree(names, links, horizontal) if horizontal and not explicit else None
+def _layered_tree(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], root: str) -> dict[str, tuple[float, float]] | None:
+    if root not in names or len(links) != len(names) - 1:
+        return None
+    adjacency: dict[str, list[str]] = {name: [] for name in names}
+    for start, end, _ in links:
+        adjacency[start].append(end)
+        adjacency[end].append(start)
+    points: dict[str, tuple[float, float]] = {}
+    seen: set[str] = set()
+    leaf = 0
+
+    def place(name: str, depth: int) -> float:
+        nonlocal leaf
+        seen.add(name)
+        children = [neighbor for neighbor in adjacency[name] if neighbor not in seen]
+        levels = [place(child, depth + 1) for child in children]
+        if levels:
+            y = sum(levels) / len(levels)
+        else:
+            y = -float(leaf)
+            leaf += 1
+        points[name] = (float(depth), y)
+        return y
+
+    place(root, 0)
+    return points if len(points) == len(names) else None
+
+
+def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]], horizontal: tuple[str, str] | None, layered: bool) -> dict[str, tuple[float, float]]:
+    anchored = (_layered_tree(names, links, horizontal[0]) if layered else _horizontal_tree(names, links, horizontal)) if horizontal and not explicit else None
     if anchored is not None:
         points = anchored
     else:
@@ -241,6 +269,7 @@ def import_tikz_feynman(source: str) -> Diagram:
     names: dict[str, object] = {}
     marked: set[str] = set()
     explicit: dict[str, tuple[float, float]] = {}
+    relative: dict[str, tuple[str, float, float]] = {}
     for match in _VERTEX.finditer(source):
         vertex_options, name, x, y = match.groups()
         position = match.end()
@@ -250,12 +279,35 @@ def import_tikz_feynman(source: str) -> Diagram:
         if not source[position:].lstrip().startswith(";"):
             raise DiagramError("Unsupported \\vertex declaration for '{}'".format(name))
         names[name] = _label(label) if label else None
-        if vertex_options and ("dot" in _options(vertex_options) or "blob" in _options(vertex_options)):
-            marked.add(name)
+        if vertex_options:
+            options = _options(vertex_options)
+            if "dot" in options or "blob" in options:
+                marked.add(name)
+            for direction in ("above right", "above left", "below right", "below left", "right", "left", "above", "below"):
+                if direction in options:
+                    reference = re.fullmatch(r"of\s+([A-Za-z][A-Za-z0-9_]*)", options[direction])
+                    if not reference:
+                        raise DiagramError("Unsupported relative position for '{}'".format(name))
+                    relative[name] = (reference.group(1), 2.0 * (("right" in direction) - ("left" in direction)),
+                                      2.0 * (("above" in direction) - ("below" in direction)))
+                    break
         if x is not None:
             explicit[name] = (float(x), float(y))
+    if relative:
+        for index, name in enumerate(item for item in names if item not in relative and item not in explicit):
+            explicit[name] = (index * 3.0, 0.0)
+        pending = dict(relative)
+        while pending:
+            ready = [name for name, (reference, _, _) in pending.items() if reference in explicit]
+            if not ready:
+                raise DiagramError("Relative vertex positions contain an unknown or circular reference.")
+            for name in ready:
+                reference, dx, dy = pending.pop(name)
+                x, y = explicit[reference]
+                explicit[name] = (x + dx, y + dy)
     links: list[tuple[str, str, dict[str, str]]] = []
     horizontal = None
+    layered = False
     commands = list(_COMMAND.finditer(source))
     if not commands:
         raise DiagramError("No TikZ-Feynman \\feynmandiagram or \\diagram command found.")
@@ -267,6 +319,7 @@ def import_tikz_feynman(source: str) -> Diagram:
             match_horizontal = _HORIZONTAL.search(options)
             if match_horizontal:
                 horizontal = match_horizontal.groups()
+            layered = layered or "layered layout" in options.lower()
         position += len(source[position:]) - len(source[position:].lstrip())
         body, _ = _group(source, position, "{", "}")
         _graph(body, names, marked, links)
@@ -274,7 +327,7 @@ def import_tikz_feynman(source: str) -> Diagram:
         raise DiagramError("No supported edges found in the TikZ-Feynman graph.")
     if len(names) > 150 or len(links) > 300:
         raise DiagramError("The diagram exceeds the studio limit of 150 vertices or 300 edges.")
-    positions = _positions(names, links, explicit, horizontal)
+    positions = _positions(names, links, explicit, horizontal, layered)
     diagram = Diagram(title="Imported LaTeX diagram")
     vertices = {}
     for name, label in names.items():
@@ -283,8 +336,8 @@ def import_tikz_feynman(source: str) -> Diagram:
         vertices[name] = vertex
         diagram.vertices.append(vertex)
     for start, end, options in links:
-        style = next((key for key in ("anti fermion", "fermion", "photon", "gluon", "charged scalar", "anti charged scalar", "scalar", "ghost") if key in options), "fermion")
-        kind = style.replace("anti ", "").replace("charged ", "")
+        style = next((key for key in ("anti fermion", "fermion", "photon", "boson", "gluon", "charged scalar", "anti charged scalar", "scalar", "ghost") if key in options), "fermion")
+        kind = "photon" if style == "boson" else style.replace("anti ", "").replace("charged ", "")
         edge = make_edge(vertices[start].id, vertices[end].id, kind)
         edge.color = _color(options)
         if "opacity" in options:
