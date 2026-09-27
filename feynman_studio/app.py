@@ -16,6 +16,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 from . import __version__
 from .geometry import connected_geometry, distance_to_polyline, edge_label_position, geometry, momentum_geometry
 from .latex import FORMATS, latex_source, standalone_source, unsupported_features
+from .latex_import import import_tikz_feynman
 from .model import (
     GRID_SIZE,
     HEIGHT,
@@ -213,6 +214,7 @@ class StudioApp:
         if name == "File":
             menu.add_command(label="New Blank Diagram", accelerator=shortcut + "+N", command=self.new_document)
             menu.add_command(label="Open…", accelerator=shortcut + "+O", command=self.open_document)
+            menu.add_command(label="Import LaTeX…", command=self.show_latex_import_dialog)
             menu.add_command(label="Save", accelerator=shortcut + "+S", command=self.save_document)
             menu.add_command(label="Save As…", accelerator=shortcut + "+Shift+S", command=lambda: self.save_document(True))
             menu.add_separator()
@@ -698,6 +700,47 @@ class StudioApp:
             self.current_path = Path(path)
         except (OSError, DiagramError) as exc:
             messagebox.showerror("Could not open project", str(exc))
+
+    def show_latex_import_dialog(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Import LaTeX diagram")
+        dialog.transient(self.root)
+        dialog.geometry("720x520")
+        frame = ttk.Frame(dialog, padding=14)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Paste TikZ-Feynman source", style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="Supports \\feynmandiagram and \\diagram graphs with named vertices, common line styles, labels, momentum, and numeric vertex coordinates.", wraplength=680).pack(anchor="w", pady=(6, 10))
+        source = tk.Text(frame, wrap="none", font=("TkFixedFont", 11), undo=True)
+        source.pack(fill="both", expand=True)
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(10, 0))
+
+        def open_tex() -> None:
+            path = filedialog.askopenfilename(parent=dialog, title="Open LaTeX source", filetypes=(("LaTeX files", "*.tex"), ("All files", "*.*")))
+            if not path:
+                return
+            try:
+                file = Path(path)
+                if file.stat().st_size > 1_000_000:
+                    raise DiagramError("LaTeX source must be smaller than 1 MB.")
+                value = file.read_text(encoding="utf-8")
+                source.delete("1.0", "end")
+                source.insert("1.0", value)
+            except (OSError, UnicodeError, DiagramError) as exc:
+                messagebox.showerror("Could not read LaTeX", str(exc), parent=dialog)
+
+        def import_source() -> None:
+            try:
+                document = import_tikz_feynman(source.get("1.0", "end-1c"))
+            except DiagramError as exc:
+                messagebox.showerror("Could not import LaTeX", str(exc), parent=dialog)
+                return
+            self._replace_document(document, "LaTeX diagram imported")
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Open .tex…", command=open_tex).pack(side="left")
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text="Import", command=import_source).pack(side="right", padx=6)
 
     def save_document(self, save_as: bool = False) -> None:
         path = self.current_path

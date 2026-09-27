@@ -324,6 +324,16 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIsNone(app.title_entry)
             self.assertEqual(app.document.title, "Untitled diagram")
 
+            app.show_latex_import_dialog()
+            dialog = next(widget for widget in root.winfo_children() if isinstance(widget, tk.Toplevel))
+            import_frame = dialog.winfo_children()[0]
+            source = next(widget for widget in import_frame.winfo_children() if isinstance(widget, tk.Text))
+            source.insert("1.0", r"\feynmandiagram { a -- [photon] b };")
+            actions = next(widget for widget in import_frame.winfo_children() if isinstance(widget, ttk.Frame))
+            next(widget for widget in actions.winfo_children() if isinstance(widget, ttk.Button) and widget.cget("text") == "Import").invoke()
+            self.assertEqual(len(app.document.edges), 1)
+            self.assertEqual(app.document.edges[0].kind, "photon")
+
         finally:
             root.destroy()
 

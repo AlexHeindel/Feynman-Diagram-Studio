@@ -18,6 +18,7 @@ A lightweight desktop and local browser editor for drawing publication-ready Fey
 - Editable JSON project files
 - Vector SVG/PDF export and PNG/JPEG export at 300, 600, or 1200 ppi
 - LaTeX export for TikZ-Feynman, TikZ-FeynHand, feynMP, feynMF, PST-Feyn, and axodraw2
+- Native app import of common TikZ-Feynman graphs as editable vertices and propagators
 - Shared version 2 project files; version 1 files open with empty annotations
 
 ### Feynman diagram features
@@ -31,6 +32,8 @@ A lightweight desktop and local browser editor for drawing publication-ready Fey
 - Ten starting templates
 
 The LaTeX dialogs show which formats cannot preserve a particular diagram. feynMF does not support custom line or annotation colors, and feynMP/feynMF cannot preserve quark-bundle spacing. Image exports remain available.
+
+In the desktop app, choose **File → Import LaTeX…** to paste TikZ-Feynman source or open a `.tex` file. The importer reads `\feynmandiagram` and `\diagram`/`\diagram*` graphs with named vertices, common particle styles, edge and particle labels, momentum labels, simple bends, and numeric `\vertex ... at (x,y)` coordinates. It lays out vertices without coordinates automatically. It does not interpret arbitrary TeX macros or raw TikZ drawing commands; unsupported graph topology produces an error instead of a partial import. The browser app does not expose LaTeX import yet.
 
 ## Install and run
 
