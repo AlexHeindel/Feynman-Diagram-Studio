@@ -3,6 +3,7 @@ import unittest
 from feynman_studio.latex_import import import_tikz_feynman
 from feynman_studio.latex import latex_source, standalone_source
 from feynman_studio.model import Diagram, DiagramError, templates
+from feynman_studio.render import display_label
 
 
 class LatexImportTests(unittest.TestCase):
@@ -44,6 +45,45 @@ class LatexImportTests(unittest.TestCase):
         diagram = templates()[0]
         for source in (latex_source(diagram, "tikz-feynman"), standalone_source(diagram, "tikz-feynhand")):
             self.assertEqual(import_tikz_feynman(source), diagram)
+
+    def test_overleaf_horizontal_photon_scattering(self):
+        source = r"""\feynmandiagram [horizontal=f2 to f3] {
+          f1 -- [fermion] f2 -- [fermion] f3 -- [fermion] f4,
+          f2 -- [photon] p1,
+          f3 -- [photon] p2,
+        };"""
+        diagram = import_tikz_feynman(source)
+        f1, f2, f3, f4, p1, p2 = diagram.vertices
+        self.assertLess(f1.x, f2.x)
+        self.assertLess(f2.x, f3.x)
+        self.assertLess(f3.x, f4.x)
+        self.assertEqual((f1.x, f1.y), (p1.x, 80))
+        self.assertGreater(p1.y, f2.y)
+        self.assertEqual((f4.x, f4.y), (p2.x, 80))
+        self.assertGreater(p2.y, f3.y)
+
+    def test_overleaf_styled_s_channel(self):
+        source = r"""\feynmandiagram [horizontal=a to b] {
+          i1 [particle=\(e^{-}\)] -- [fermion, very thick] a -- [fermion, opacity=0.2] i2 [particle=\(e^{+}\)],
+          a -- [red, photon, edge label=\(\gamma\), momentum'={[arrow style=red]\(k\)}] b,
+          f1 [particle=\(\mu^{+}\)] -- [fermion, opacity=0.2] b -- [fermion, very thick] f2 [particle=\(\mu^{-}\)],
+        };"""
+        diagram = import_tikz_feynman(source)
+        i1, a, i2, b, f1, f2 = diagram.vertices
+        self.assertEqual([item.label for item in diagram.vertices], ["e^{-}", "", "e^{+}", "", r"\mu^{+}", r"\mu^{-}"])
+        self.assertEqual(display_label(i1.label), "e⁻")
+        self.assertEqual(display_label(f1.label), "μ⁺")
+        self.assertEqual(i1.x, i2.x)
+        self.assertEqual(f1.x, f2.x)
+        self.assertLess(i1.y, a.y)
+        self.assertLess(f1.y, b.y)
+        self.assertGreater(i2.y, a.y)
+        self.assertGreater(f2.y, b.y)
+        self.assertLess(a.x, b.x)
+        photon = diagram.edges[2]
+        self.assertEqual((photon.kind, photon.color, photon.label), ("photon", "#FF0000", r"\gamma"))
+        self.assertEqual((photon.momentum.label, photon.momentum.color, photon.momentum.side), ("k", "#FF0000", "right"))
+        self.assertEqual(diagram.edges[1].color, "#CCCCCC")
 
 
 if __name__ == "__main__":

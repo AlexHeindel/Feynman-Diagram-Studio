@@ -10,13 +10,16 @@ from collections import deque
 from .model import Diagram, DiagramError, Momentum, make_edge, make_vertex
 
 
-_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+_HORIZONTAL = re.compile(r"\bhorizontal\s*=\s*([A-Za-z][A-Za-z0-9_]*)\s+to\s+([A-Za-z][A-Za-z0-9_]*)")
 _VERTEX = re.compile(
     rf"\\vertex\s*(?:\[([^\]]*)\]\s*)?\(([A-Za-z][A-Za-z0-9_]*)\)\s*"
     rf"(?:at\s*\(\s*({_NUMBER})\s*,\s*({_NUMBER})\s*\)\s*)?"
 )
 _COMMAND = re.compile(r"\\(?:feynmandiagram|diagram\*?)(?=\s|\[|\{)")
+_COLORS = {"black": "#000000", "white": "#FFFFFF", "red": "#FF0000", "blue": "#0000FF",
+           "green": "#008000", "cyan": "#00FFFF", "magenta": "#FF00FF", "yellow": "#FFFF00",
+           "gray": "#808080", "grey": "#808080", "orange": "#FFA500"}
 
 
 def _group(source: str, start: int, opening: str, closing: str) -> tuple[str, int]:
@@ -59,7 +62,23 @@ def _options(source: str) -> dict[str, str]:
 
 def _label(source: str) -> str:
     value = source.strip().strip("{}")
-    return value[1:-1] if value.startswith("$") and value.endswith("$") else value
+    if value.startswith("$") and value.endswith("$"):
+        return value[1:-1]
+    if value.startswith(r"\(") and value.endswith(r"\)"):
+        return value[2:-2]
+    return value
+
+
+def _color(options: dict[str, str], default: str = "#000000") -> str:
+    value = options.get("draw", options.get("color", ""))
+    if not value:
+        value = next((name for name in _COLORS if name in options), "")
+    value = value.lower()
+    if value in _COLORS:
+        return _COLORS[value]
+    if re.fullmatch(r"#[0-9a-f]{6}", value):
+        return value.upper()
+    return default
 
 
 def _graph(body: str, names: dict[str, object], marked: set[str], links: list[tuple[str, str, dict[str, str]]]) -> None:
@@ -117,7 +136,59 @@ def _graph(body: str, names: dict[str, object], marked: set[str], links: list[tu
                     raise DiagramError("Unsupported TikZ-Feynman graph syntax near '{}'".format(chain[position:position + 30]))
 
 
-def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
+def _horizontal_tree(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], anchors: tuple[str, str]) -> dict[str, tuple[float, float]] | None:
+    if len(links) != len(names) - 1 or any(name not in names for name in anchors):
+        return None
+    adjacency: dict[str, list[str]] = {name: [] for name in names}
+    for start, end, _ in links:
+        adjacency[start].append(end)
+        adjacency[end].append(start)
+    parents = {anchors[0]: None}
+    queue = deque([anchors[0]])
+    while queue and anchors[1] not in parents:
+        current = queue.popleft()
+        for neighbor in adjacency[current]:
+            if neighbor not in parents:
+                parents[neighbor] = current
+                queue.append(neighbor)
+    if anchors[1] not in parents:
+        return None
+    path = [anchors[1]]
+    while path[-1] != anchors[0]:
+        path.append(parents[path[-1]])
+    path.reverse()
+    points = {name: (float(index), 0.0) for index, name in enumerate(path)}
+    path_names = set(path)
+    for index, name in enumerate(path):
+        direction = -1 if index < (len(path) - 1) / 2 else 1
+        children = [neighbor for neighbor in adjacency[name] if neighbor not in path_names]
+        for child_index, child in enumerate(children):
+            points[child] = (index + direction * 1.5, (len(children) - 1) / 2 - child_index)
+            queue = deque([(child, name)])
+            while queue:
+                current, previous = queue.popleft()
+                descendants = [neighbor for neighbor in adjacency[current] if neighbor != previous and neighbor not in points]
+                for next_index, neighbor in enumerate(descendants):
+                    x, y = points[current]
+                    points[neighbor] = (x + direction * 1.5, y + (len(descendants) - 1) / 2 - next_index)
+                    queue.append((neighbor, current))
+    return points if len(points) == len(names) else None
+
+
+def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]], horizontal: tuple[str, str] | None) -> dict[str, tuple[float, float]]:
+    anchored = _horizontal_tree(names, links, horizontal) if horizontal and not explicit else None
+    if anchored is not None:
+        points = anchored
+    else:
+        points = _inferred_positions(names, links, explicit)
+    xs, ys = [point[0] for point in points.values()], [point[1] for point in points.values()]
+    left, right, bottom, top = min(xs), max(xs), min(ys), max(ys)
+    return {name: (100 + (x - left) / (right - left) * 520 if right > left else 360,
+                   400 - (y - bottom) / (top - bottom) * 320 if top > bottom else 240)
+            for name, (x, y) in points.items()}
+
+
+def _inferred_positions(names: dict[str, object], links: list[tuple[str, str, dict[str, str]]], explicit: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
     points = dict(explicit)
     adjacency: dict[str, list[tuple[str, int]]] = {name: [] for name in names}
     for start, end, _ in links:
@@ -153,11 +224,7 @@ def _positions(names: dict[str, object], links: list[tuple[str, str, dict[str, s
         if len(group) > 1 and movable:
             for index, name in enumerate(movable):
                 points[name] = (x, y + (index - (len(movable) - 1) / 2) * 1.5)
-    xs, ys = [point[0] for point in points.values()], [point[1] for point in points.values()]
-    left, right, bottom, top = min(xs), max(xs), min(ys), max(ys)
-    return {name: (100 + (x - left) / (right - left) * 520 if right > left else 360,
-                   400 - (y - bottom) / (top - bottom) * 320 if top > bottom else 240)
-            for name, (x, y) in points.items()}
+    return points
 
 
 def import_tikz_feynman(source: str) -> Diagram:
@@ -188,6 +255,7 @@ def import_tikz_feynman(source: str) -> Diagram:
         if x is not None:
             explicit[name] = (float(x), float(y))
     links: list[tuple[str, str, dict[str, str]]] = []
+    horizontal = None
     commands = list(_COMMAND.finditer(source))
     if not commands:
         raise DiagramError("No TikZ-Feynman \\feynmandiagram or \\diagram command found.")
@@ -195,7 +263,10 @@ def import_tikz_feynman(source: str) -> Diagram:
         position = match.end()
         position += len(source[position:]) - len(source[position:].lstrip())
         if position < len(source) and source[position] == "[":
-            _, position = _group(source, position, "[", "]")
+            options, position = _group(source, position, "[", "]")
+            match_horizontal = _HORIZONTAL.search(options)
+            if match_horizontal:
+                horizontal = match_horizontal.groups()
         position += len(source[position:]) - len(source[position:].lstrip())
         body, _ = _group(source, position, "{", "}")
         _graph(body, names, marked, links)
@@ -203,7 +274,7 @@ def import_tikz_feynman(source: str) -> Diagram:
         raise DiagramError("No supported edges found in the TikZ-Feynman graph.")
     if len(names) > 150 or len(links) > 300:
         raise DiagramError("The diagram exceeds the studio limit of 150 vertices or 300 edges.")
-    positions = _positions(names, links, explicit)
+    positions = _positions(names, links, explicit, horizontal)
     diagram = Diagram(title="Imported LaTeX diagram")
     vertices = {}
     for name, label in names.items():
@@ -215,6 +286,16 @@ def import_tikz_feynman(source: str) -> Diagram:
         style = next((key for key in ("anti fermion", "fermion", "photon", "gluon", "charged scalar", "anti charged scalar", "scalar", "ghost") if key in options), "fermion")
         kind = style.replace("anti ", "").replace("charged ", "")
         edge = make_edge(vertices[start].id, vertices[end].id, kind)
+        edge.color = _color(options)
+        if "opacity" in options:
+            try:
+                opacity = float(options["opacity"])
+            except ValueError as exc:
+                raise DiagramError("Opacity must be a number between 0 and 1.") from exc
+            if not 0 <= opacity <= 1:
+                raise DiagramError("Opacity must be a number between 0 and 1.")
+            rgb = tuple(int(edge.color[index:index + 2], 16) for index in (1, 3, 5))
+            edge.color = "#" + "".join("{:02X}".format(round(255 * (1 - opacity) + value * opacity)) for value in rgb)
         if style == "anti fermion":
             edge.arrow = "reverse"
         elif style in ("charged scalar", "anti charged scalar"):
@@ -229,8 +310,12 @@ def import_tikz_feynman(source: str) -> Diagram:
         elif "half right" in options or "quarter right" in options:
             edge.curvature = 65 if "half right" in options else 35
         if "momentum" in options or "momentum'" in options:
-            edge.momentum = Momentum(label=_label(options.get("momentum", options.get("momentum'", ""))))
-            if "momentum'" in options:
-                edge.momentum.side = "left"
+            value = options.get("momentum", options.get("momentum'", ""))
+            color = edge.color
+            if value.startswith("["):
+                styling, position = _group(value, 0, "[", "]")
+                color = _color({"draw": _options(styling).get("arrow style", "")}, color)
+                value = value[position:].strip()
+            edge.momentum = Momentum(label=_label(value), side="right" if "momentum'" in options else "left", color=color)
         diagram.edges.append(edge)
     return Diagram.from_dict(diagram.to_dict())
