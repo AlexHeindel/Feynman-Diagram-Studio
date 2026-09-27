@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections import deque
 
@@ -162,6 +164,12 @@ def import_tikz_feynman(source: str) -> Diagram:
     """Read a TikZ-Feynman graph or snippet; reject syntax that loses topology."""
     if len(source.encode("utf-8")) > 1_000_000:
         raise DiagramError("LaTeX source must be smaller than 1 MB.")
+    embedded = re.findall(r"(?m)^% FDS_DIAGRAM_JSON: ([A-Za-z0-9+/=]+)$", source)
+    if embedded:
+        try:
+            return Diagram.from_json(base64.b64decode("".join(embedded), validate=True).decode("utf-8"))
+        except (binascii.Error, UnicodeError) as exc:
+            raise DiagramError("Invalid embedded studio diagram in LaTeX source.") from exc
     source = re.sub(r"(?<!\\)%[^\n]*", "", source)
     names: dict[str, object] = {}
     marked: set[str] = set()

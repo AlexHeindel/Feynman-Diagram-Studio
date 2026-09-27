@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from feynman_studio.app import StudioApp, check_tk_version
+from feynman_studio.latex import latex_source
 from feynman_studio.model import KINDS, Momentum, blank_diagram, make_edge, make_vertex
 
 
@@ -330,9 +331,22 @@ class GuiSmokeTests(unittest.TestCase):
             source = next(widget for widget in import_frame.winfo_children() if isinstance(widget, tk.Text))
             source.insert("1.0", r"\feynmandiagram { a -- [photon] b };")
             actions = next(widget for widget in import_frame.winfo_children() if isinstance(widget, ttk.Frame))
-            next(widget for widget in actions.winfo_children() if isinstance(widget, ttk.Button) and widget.cget("text") == "Import").invoke()
+            import_button = next(widget for widget in actions.winfo_children() if isinstance(widget, ttk.Button) and widget.cget("text") == "Import")
+            root.update()
+            self.assertLessEqual(import_button.winfo_rooty() + import_button.winfo_height(), dialog.winfo_rooty() + dialog.winfo_height())
+            import_button.invoke()
             self.assertEqual(len(app.document.edges), 1)
             self.assertEqual(app.document.edges[0].kind, "photon")
+
+            expected = app.document.clone()
+            old_export = "\n".join(line for line in latex_source(expected, "tikz-feynman").splitlines() if not line.startswith("%"))
+            app.show_latex_import_dialog()
+            dialog = next(widget for widget in root.winfo_children() if isinstance(widget, tk.Toplevel))
+            import_frame = dialog.winfo_children()[0]
+            next(widget for widget in import_frame.winfo_children() if isinstance(widget, tk.Text)).insert("1.0", old_export)
+            actions = next(widget for widget in import_frame.winfo_children() if isinstance(widget, ttk.Frame))
+            next(widget for widget in actions.winfo_children() if isinstance(widget, ttk.Button) and widget.cget("text") == "Import").invoke()
+            self.assertEqual(app.document, expected)
 
         finally:
             root.destroy()

@@ -709,11 +709,11 @@ class StudioApp:
         frame = ttk.Frame(dialog, padding=14)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Paste TikZ-Feynman source", style="Heading.TLabel").pack(anchor="w")
-        ttk.Label(frame, text="Supports \\feynmandiagram and \\diagram graphs with named vertices, common line styles, labels, momentum, and numeric vertex coordinates.", wraplength=680).pack(anchor="w", pady=(6, 10))
+        ttk.Label(frame, text="Supports studio TikZ exports and \\feynmandiagram or \\diagram graphs with named vertices, common line styles, labels, momentum, and numeric vertex coordinates.", wraplength=680).pack(anchor="w", pady=(6, 10))
         source = tk.Text(frame, wrap="none", font=("TkFixedFont", 11), undo=True)
-        source.pack(fill="both", expand=True)
         buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(10, 0))
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
+        source.pack(fill="both", expand=True)
 
         def open_tex() -> None:
             path = filedialog.askopenfilename(parent=dialog, title="Open LaTeX source", filetypes=(("LaTeX files", "*.tex"), ("All files", "*.*")))
@@ -731,10 +731,22 @@ class StudioApp:
 
         def import_source() -> None:
             try:
-                document = import_tikz_feynman(source.get("1.0", "end-1c"))
+                value = source.get("1.0", "end-1c")
+                document = import_tikz_feynman(value)
             except DiagramError as exc:
-                messagebox.showerror("Could not import LaTeX", str(exc), parent=dialog)
-                return
+                # Older studio exports have no embedded model. Recover exact copies
+                # from diagrams still present in the native app.
+                normalized = re.sub(r"(?m)^%[^\n]*\n?", "", value).strip()
+                document = None
+                if "plot coordinates" in value:
+                    for item in [self.document] + [project["diagram"] for project in self.projects]:
+                        if any(normalized == re.sub(r"(?m)^%[^\n]*\n?", "", latex_source(item, option)).strip()
+                               for option in ("tikz-feynman", "tikz-feynhand")):
+                            document = item.clone()
+                            break
+                if document is None:
+                    messagebox.showerror("Could not import LaTeX", str(exc), parent=dialog)
+                    return
             self._replace_document(document, "LaTeX diagram imported")
             dialog.destroy()
 

@@ -33,7 +33,7 @@ A lightweight desktop and local browser editor for drawing publication-ready Fey
 
 The LaTeX dialogs show which formats cannot preserve a particular diagram. feynMF does not support custom line or annotation colors, and feynMP/feynMF cannot preserve quark-bundle spacing. Image exports remain available.
 
-In the desktop app, choose **File → Import LaTeX…** to paste TikZ-Feynman source or open a `.tex` file. The importer reads `\feynmandiagram` and `\diagram`/`\diagram*` graphs with named vertices, common particle styles, edge and particle labels, momentum labels, simple bends, and numeric `\vertex ... at (x,y)` coordinates. It lays out vertices without coordinates automatically. It does not interpret arbitrary TeX macros or raw TikZ drawing commands; unsupported graph topology produces an error instead of a partial import. The browser app does not expose LaTeX import yet.
+In the desktop app, choose **File → Import LaTeX…** to paste TikZ-Feynman source or open a `.tex` file. The importer reads `\feynmandiagram` and `\diagram`/`\diagram*` graphs with named vertices, common particle styles, edge and particle labels, momentum labels, simple bends, and numeric `\vertex ... at (x,y)` coordinates. It lays out vertices without coordinates automatically. Studio TikZ exports also carry the editable diagram for exact reimport. Older studio TikZ exports can be reimported while the original diagram remains in the native app. Other raw TikZ drawing commands and arbitrary TeX macros are unsupported; the browser app does not expose LaTeX import yet.
 
 ## Install and run
 

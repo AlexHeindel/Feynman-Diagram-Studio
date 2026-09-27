@@ -1,7 +1,8 @@
 import unittest
 
 from feynman_studio.latex_import import import_tikz_feynman
-from feynman_studio.model import Diagram, DiagramError
+from feynman_studio.latex import latex_source, standalone_source
+from feynman_studio.model import Diagram, DiagramError, templates
 
 
 class LatexImportTests(unittest.TestCase):
@@ -38,6 +39,11 @@ class LatexImportTests(unittest.TestCase):
             import_tikz_feynman(r"\feynmandiagram { a -- [fermion] {b, c} };")
         with self.assertRaises(DiagramError):
             import_tikz_feynman(r"\begin{tikzpicture}\draw (0,0) -- (1,0);\end{tikzpicture}")
+
+    def test_studio_tikz_export_round_trips_exactly(self):
+        diagram = templates()[0]
+        for source in (latex_source(diagram, "tikz-feynman"), standalone_source(diagram, "tikz-feynhand")):
+            self.assertEqual(import_tikz_feynman(source), diagram)
 
 
 if __name__ == "__main__":
